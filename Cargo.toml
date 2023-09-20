@@ -1,0 +1,12 @@
+[package]
+name = "albedo"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dotenv = "0.15.0"
+serde = { version = "1.0.171", features = ["derive"] }
+serenity = { version = "0.11", default-features = false, features = ["collector", "framework", "standard_framework", "client", "gateway", "rustls_backend", "model", "utils"] }
+tokio = { version = "1.21.2", features = ["macros", "rt-multi-thread"] }
