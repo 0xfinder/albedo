@@ -20,6 +20,8 @@ pub struct TrackedWallet {
     pub user_id: i64,
     pub wallet_address: String,
     pub label: Option<String>,
+    pub last_activity_hash: Option<String>,
+    pub last_positions_hash: Option<String>,
     pub created_at: String,
 }
 

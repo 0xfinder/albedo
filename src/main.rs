@@ -18,13 +18,20 @@ async fn main() -> Result<()> {
     // Initialize database
     let db = db::init(&config.database_url).await?;
     
-    let _monitor_handle = monitoring::spawn_monitoring(
-        db.clone(),
-        config.polymarket_ws_asset_ids.clone(),
-    );
-
     // Start bot
     let bot = Bot::new(&config.telegram_token);
+
+    let _data_handle = monitoring::spawn_data_polling(
+        bot.clone(),
+        db.clone(),
+        config.data_poll_seconds,
+    );
+
+    let _ws_handle = monitoring::spawn_ws_user_events(
+        bot.clone(),
+        db.clone(),
+        config.ws_credentials.clone(),
+    );
 
     // Start bot dispatcher
     bot::start(bot, db).await?;

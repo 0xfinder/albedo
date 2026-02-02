@@ -2,10 +2,20 @@ pub mod models;
 
 use color_eyre::eyre::Result;
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::SqlitePool;
+use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
 pub type Db = SqlitePool;
+
+#[derive(Debug, FromRow)]
+pub struct TrackedWalletWithUser {
+    pub user_id: i64,
+    pub chat_id: i64,
+    pub wallet_address: String,
+    pub label: Option<String>,
+    pub last_activity_hash: Option<String>,
+    pub last_positions_hash: Option<String>,
+}
 
 pub async fn init(database_url: &str) -> Result<Db> {
     let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
@@ -99,9 +109,21 @@ pub async fn add_tracked_wallet(
 
 pub async fn list_tracked_wallets(db: &Db, user_id: i64) -> Result<Vec<models::TrackedWallet>> {
     let wallets = sqlx::query_as::<_, models::TrackedWallet>(
-        "SELECT id, user_id, wallet_address, label, created_at FROM tracked_wallets WHERE user_id = ? ORDER BY created_at",
+        "SELECT id, user_id, wallet_address, label, last_activity_hash, last_positions_hash, created_at FROM tracked_wallets WHERE user_id = ? ORDER BY created_at",
     )
     .bind(user_id)
+    .fetch_all(db)
+    .await?;
+
+    Ok(wallets)
+}
+
+pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalletWithUser>> {
+    let wallets = sqlx::query_as::<_, TrackedWalletWithUser>(
+        "SELECT tracked_wallets.user_id, users.chat_id, tracked_wallets.wallet_address, tracked_wallets.label, tracked_wallets.last_activity_hash, tracked_wallets.last_positions_hash\
+         FROM tracked_wallets\
+         INNER JOIN users ON users.id = tracked_wallets.user_id",
+    )
     .fetch_all(db)
     .await?;
 
@@ -128,4 +150,40 @@ pub async fn count_tracked_wallets(db: &Db, user_id: i64) -> Result<i64> {
             .await?;
 
     Ok(count)
+}
+
+pub async fn update_tracked_wallet_activity_hash(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    hash: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE tracked_wallets SET last_activity_hash = ? WHERE user_id = ? AND wallet_address = ?",
+    )
+    .bind(hash)
+    .bind(user_id)
+    .bind(wallet_address)
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn update_tracked_wallet_positions_hash(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    hash: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE tracked_wallets SET last_positions_hash = ? WHERE user_id = ? AND wallet_address = ?",
+    )
+    .bind(hash)
+    .bind(user_id)
+    .bind(wallet_address)
+    .execute(db)
+    .await?;
+
+    Ok(())
 }

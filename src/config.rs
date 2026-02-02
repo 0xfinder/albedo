@@ -5,7 +5,16 @@ use std::env;
 pub struct Config {
     pub telegram_token: String,
     pub database_url: String,
-    pub polymarket_ws_asset_ids: Vec<String>,
+    pub data_poll_seconds: u64,
+    pub ws_credentials: Option<WsCredentialsConfig>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WsCredentialsConfig {
+    pub api_key: String,
+    pub api_secret: String,
+    pub api_passphrase: String,
+    pub address: String,
 }
 
 impl Config {
@@ -16,12 +25,17 @@ impl Config {
             env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://bot.db".to_string());
         let database_url = normalize_database_url(database_url);
 
-        let polymarket_ws_asset_ids = parse_csv_env("POLYMARKET_WS_ASSET_IDS");
+        let data_poll_seconds = env::var("POLYMARKET_DATA_POLL_SECONDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(60);
+        let ws_credentials = read_ws_credentials();
 
         Ok(Self {
             telegram_token: env::var("TELEGRAM_TOKEN").context("TELEGRAM_TOKEN not set")?,
             database_url,
-            polymarket_ws_asset_ids,
+            data_poll_seconds,
+            ws_credentials,
         })
     }
 }
@@ -42,14 +56,16 @@ fn normalize_database_url(raw: String) -> String {
     format!("sqlite://{}", raw)
 }
 
-fn parse_csv_env(key: &str) -> Vec<String> {
-    match env::var(key) {
-        Ok(value) => value
-            .split(',')
-            .map(|item| item.trim())
-            .filter(|item| !item.is_empty())
-            .map(str::to_string)
-            .collect(),
-        Err(_) => Vec::new(),
-    }
+fn read_ws_credentials() -> Option<WsCredentialsConfig> {
+    let api_key = env::var("POLYMARKET_API_KEY").ok()?;
+    let api_secret = env::var("POLYMARKET_API_SECRET").ok()?;
+    let api_passphrase = env::var("POLYMARKET_API_PASSPHRASE").ok()?;
+    let address = env::var("POLYMARKET_ADDRESS").ok()?;
+
+    Some(WsCredentialsConfig {
+        api_key,
+        api_secret,
+        api_passphrase,
+        address,
+    })
 }

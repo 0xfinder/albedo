@@ -71,7 +71,11 @@ aes-gcm = "0.10"
 - `DATABASE_URL` (default: `sqlite://bot.db`)
 - `ENCRYPTION_KEY` (required when storing private keys)
 - `POLYMARKET_API_URL` (default: `https://clob.polymarket.com`)
-- `POLYMARKET_WS_ASSET_IDS` (comma-separated asset IDs for WS monitoring)
+- `POLYMARKET_DATA_POLL_SECONDS` (default: `60`)
+- `POLYMARKET_API_KEY` (WS user events)
+- `POLYMARKET_API_SECRET` (WS user events)
+- `POLYMARKET_API_PASSPHRASE` (WS user events)
+- `POLYMARKET_ADDRESS` (WS user events)
 
 ## Database Schema (SQLite)
 ```
@@ -93,6 +97,8 @@ CREATE TABLE tracked_wallets (
   user_id INTEGER NOT NULL,
   wallet_address TEXT NOT NULL,
   label TEXT,
+  last_activity_hash TEXT,
+  last_positions_hash TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id),
   UNIQUE(user_id, wallet_address)
