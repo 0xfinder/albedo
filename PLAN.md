@@ -30,10 +30,11 @@
 │ Polymarket CLOB Client (SDK)                        │
 ├─────────────────────────────────────────────────────┤
 │ SQLite Database                                     │
-│ - users (id, chat_id, mode, auth_state)             │
-│ - wallets (user_id, address, label, created_at)     │
-│ - tracked_positions (wallet, market, data, time)    │
-│ - auth_sessions (user_id, encrypted_key, nonce)     │
+│ - users (id, chat_id, mode)                         │
+│ - tracked_wallets (user_id, address, label)         │
+│ - position_snapshots (wallet, market, data, time)   │
+│ - managed_wallets (user_id, encrypted_key, nonce)   │
+│ - activity_log (wallet, type, details)              │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -129,6 +130,20 @@ CREATE TABLE activity_log (
   notified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+```
+
+## Database Notes
+- Enable foreign keys on every SQLite connection.
+- Normalize `wallet_address` to lowercase before insert.
+- Add indexes for lookup-heavy queries.
+
+Example indexes:
+```
+CREATE INDEX IF NOT EXISTS idx_tracked_wallets_user_id ON tracked_wallets(user_id);
+CREATE INDEX IF NOT EXISTS idx_position_snapshots_wallet_address ON position_snapshots(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_managed_wallets_user_id ON managed_wallets(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_log_notified ON activity_log(notified);
+CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log(created_at);
 ```
 
 ## File Structure (Target)
