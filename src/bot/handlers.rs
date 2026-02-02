@@ -1,4 +1,5 @@
 use teloxide::prelude::*;
+use teloxide::types::{KeyboardButton, KeyboardMarkup, KeyboardRemove};
 use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
@@ -18,7 +19,7 @@ pub async fn handle_message(bot: Bot, msg: Message, db: Db, bot_name: String) ->
         None => return Ok(()),
     };
 
-    let Some((command, args)) = parse_command(text.as_str(), bot_name.as_str()) else {
+    let Some((command, args)) = parse_incoming_command(text.as_str(), bot_name.as_str()) else {
         return Ok(());
     };
 
@@ -38,7 +39,7 @@ pub async fn handle_message(bot: Bot, msg: Message, db: Db, bot_name: String) ->
         }
     };
 
-    match command.to_lowercase().as_str() {
+    match command.as_str() {
         "start" => handle_start(bot, msg).await?,
         "help" => handle_help(bot, msg).await?,
         "track" => handle_track_command(bot, msg, &db, user_id, &args).await?,
@@ -53,7 +54,12 @@ pub async fn handle_message(bot: Bot, msg: Message, db: Db, bot_name: String) ->
 }
 
 async fn handle_start(bot: Bot, msg: Message) -> ResponseResult<()> {
-    bot.send_message(msg.chat.id, "Welcome to Polymarket Bot! Use /help to see commands.")
+    bot.send_message(msg.chat.id, "Menu updated.")
+        .reply_markup(KeyboardRemove::new())
+        .await?;
+
+    bot.send_message(msg.chat.id, "Welcome to Polymarket Bot! Pick a mode below.")
+        .reply_markup(track_manage_keyboard())
         .await?;
     Ok(())
 }
@@ -68,7 +74,7 @@ async fn handle_track_command(
     msg: Message,
     db: &Db,
     user_id: i64,
-    args: &[&str],
+    args: &[String],
 ) -> ResponseResult<()> {
     if let Err(_err) = db::set_mode(db, user_id, "track").await {
         bot.send_message(msg.chat.id, "Sorry, I couldn't switch modes. Try again soon.")
@@ -101,9 +107,9 @@ async fn handle_track_add(
     msg: Message,
     db: &Db,
     user_id: i64,
-    args: &[&str],
+    args: &[String],
 ) -> ResponseResult<()> {
-    let Some(address) = args.first() else {
+    let Some(address) = args.first().map(String::as_str) else {
         bot.send_message(msg.chat.id, "Usage: /track add <address> [label]").await?;
         return Ok(());
     };
@@ -170,9 +176,9 @@ async fn handle_track_remove(
     msg: Message,
     db: &Db,
     user_id: i64,
-    args: &[&str],
+    args: &[String],
 ) -> ResponseResult<()> {
-    let Some(address) = args.first() else {
+    let Some(address) = args.first().map(String::as_str) else {
         bot.send_message(msg.chat.id, "Usage: /track remove <address>").await?;
         return Ok(());
     };
@@ -226,4 +232,30 @@ async fn handle_manage_mode(bot: Bot, msg: Message, db: &Db, user_id: i64) -> Re
 
 fn normalize_wallet_address(raw: &str) -> String {
     raw.trim().to_lowercase()
+}
+
+fn track_manage_keyboard() -> KeyboardMarkup {
+    KeyboardMarkup::new(vec![vec![
+        KeyboardButton::new("Track"),
+        KeyboardButton::new("Manage"),
+    ]])
+    .resize_keyboard()
+}
+
+fn parse_incoming_command(text: &str, bot_name: &str) -> Option<(String, Vec<String>)> {
+    if let Some((command, args)) = parse_command(text, bot_name) {
+        return Some((
+            command.to_lowercase(),
+            args.into_iter().map(str::to_string).collect(),
+        ));
+    }
+
+    let mut parts = text.split_whitespace();
+    let command = parts.next()?.to_lowercase();
+    let args: Vec<String> = parts.map(str::to_string).collect();
+
+    match command.as_str() {
+        "start" | "help" | "track" | "manage" => Some((command, args)),
+        _ => None,
+    }
 }
