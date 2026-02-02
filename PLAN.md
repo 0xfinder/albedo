@@ -80,6 +80,7 @@ CREATE TABLE users (
   telegram_id BIGINT UNIQUE NOT NULL,
   chat_id BIGINT NOT NULL,
   current_mode TEXT CHECK(current_mode IN ('none', 'track', 'manage')) DEFAULT 'none',
+  pending_action TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -47,6 +47,36 @@ pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn set_pending_action(db: &Db, user_id: i64, action: &str) -> Result<()> {
+    sqlx::query("UPDATE users SET pending_action = ? WHERE id = ?")
+        .bind(action)
+        .bind(user_id)
+        .execute(db)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn clear_pending_action(db: &Db, user_id: i64) -> Result<()> {
+    sqlx::query("UPDATE users SET pending_action = NULL WHERE id = ?")
+        .bind(user_id)
+        .execute(db)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn get_pending_action(db: &Db, user_id: i64) -> Result<Option<String>> {
+    let (action,) = sqlx::query_as::<_, (Option<String>,)>(
+        "SELECT pending_action FROM users WHERE id = ?",
+    )
+    .bind(user_id)
+    .fetch_one(db)
+    .await?;
+
+    Ok(action)
+}
+
 pub async fn add_tracked_wallet(
     db: &Db,
     user_id: i64,
