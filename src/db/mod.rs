@@ -19,7 +19,7 @@ pub async fn init(database_url: &str) -> Result<Db> {
     Ok(pool)
 }
 
-pub async fn upsert_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<()> {
+pub async fn ensure_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<i64> {
     sqlx::query(
         "INSERT INTO users (telegram_id, chat_id, current_mode) VALUES (?, ?, 'none')\
          ON CONFLICT(telegram_id) DO UPDATE SET chat_id = excluded.chat_id, last_active = CURRENT_TIMESTAMP",
@@ -29,17 +29,72 @@ pub async fn upsert_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<()> 
     .execute(db)
     .await?;
 
-    Ok(())
+    let (user_id,) = sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE telegram_id = ?")
+        .bind(telegram_id)
+        .fetch_one(db)
+        .await?;
+
+    Ok(user_id)
 }
 
-pub async fn set_mode(db: &Db, telegram_id: i64, mode: &str) -> Result<()> {
-    sqlx::query(
-        "UPDATE users SET current_mode = ?, last_active = CURRENT_TIMESTAMP WHERE telegram_id = ?",
-    )
+pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
+    sqlx::query("UPDATE users SET current_mode = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?")
     .bind(mode)
-    .bind(telegram_id)
+    .bind(user_id)
     .execute(db)
     .await?;
 
     Ok(())
+}
+
+pub async fn add_tracked_wallet(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    label: Option<&str>,
+) -> Result<bool> {
+    let result = sqlx::query(
+        "INSERT INTO tracked_wallets (user_id, wallet_address, label) VALUES (?, ?, ?)\
+         ON CONFLICT(user_id, wallet_address) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(wallet_address)
+    .bind(label)
+    .execute(db)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn list_tracked_wallets(db: &Db, user_id: i64) -> Result<Vec<models::TrackedWallet>> {
+    let wallets = sqlx::query_as::<_, models::TrackedWallet>(
+        "SELECT id, user_id, wallet_address, label, created_at FROM tracked_wallets WHERE user_id = ? ORDER BY created_at",
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?;
+
+    Ok(wallets)
+}
+
+pub async fn remove_tracked_wallet(db: &Db, user_id: i64, wallet_address: &str) -> Result<bool> {
+    let result = sqlx::query(
+        "DELETE FROM tracked_wallets WHERE user_id = ? AND wallet_address = ?",
+    )
+    .bind(user_id)
+    .bind(wallet_address)
+    .execute(db)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn count_tracked_wallets(db: &Db, user_id: i64) -> Result<i64> {
+    let (count,) =
+        sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM tracked_wallets WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_one(db)
+            .await?;
+
+    Ok(count)
 }
