@@ -10,7 +10,8 @@ const HELP_TEXT: &str = "Available commands:\n\
 /start - Start the bot\n\
 /help - Show this help message";
 
-const ACTION_TRACK_ADD: &str = "track_add";
+const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
+const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
 const ACTION_TRACK_REMOVE: &str = "track_remove";
 
 pub async fn handle_message(bot: Bot, msg: Message, db: Db, bot_name: String) -> ResponseResult<()> {
@@ -36,16 +37,24 @@ pub async fn handle_message(bot: Bot, msg: Message, db: Db, bot_name: String) ->
     };
 
     if let Some((command, _args)) = parse_incoming_command(text.as_str(), bot_name.as_str()) {
-        let _ = db::clear_pending_action(&db, user_id).await;
+        let _ = db::clear_pending_state(&db, user_id).await;
         return handle_top_level_command(bot, msg, &db, user_id, command.as_str()).await;
     }
 
-    match db::get_pending_action(&db, user_id).await {
-        Ok(Some(action)) => {
-            return handle_pending_action(bot, msg, &db, user_id, action.as_str(), text.as_str())
-                .await;
+    match db::get_pending_state(&db, user_id).await {
+        Ok((Some(action), data)) => {
+            return handle_pending_action(
+                bot,
+                msg,
+                &db,
+                user_id,
+                action.as_str(),
+                data.as_deref(),
+                text.as_str(),
+            )
+            .await;
         }
-        Ok(None) => {}
+        Ok((None, _)) => {}
         Err(_err) => {
             bot.send_message(msg.chat.id, "Sorry, I couldn't read your session state.").await?;
             return Ok(());
@@ -77,21 +86,21 @@ pub async fn handle_callback(bot: Bot, query: CallbackQuery, db: Db) -> Response
 
     match data.as_str() {
         "menu:main" => {
-            let _ = db::clear_pending_action(&db, user_id).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
             send_callback_menu(&bot, &query, "Choose a mode:", main_menu_markup()).await?;
         }
         "menu:track" => {
-            let _ = db::clear_pending_action(&db, user_id).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
             let _ = db::set_mode(&db, user_id, "track").await;
             send_callback_menu(&bot, &query, "Track menu:", track_menu_markup()).await?;
         }
         "menu:manage" => {
-            let _ = db::clear_pending_action(&db, user_id).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
             let _ = db::set_mode(&db, user_id, "manage").await;
             send_callback_menu(&bot, &query, "Manage menu (coming soon):", manage_menu_markup()).await?;
         }
         "track:add" => {
-            let _ = db::set_pending_action(&db, user_id, ACTION_TRACK_ADD).await;
+            let _ = db::set_pending_state(&db, user_id, Some(ACTION_TRACK_ADD_ADDRESS), None).await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -101,7 +110,7 @@ pub async fn handle_callback(bot: Bot, query: CallbackQuery, db: Db) -> Response
             .await?;
         }
         "track:remove" => {
-            let _ = db::set_pending_action(&db, user_id, ACTION_TRACK_REMOVE).await;
+            let _ = db::set_pending_state(&db, user_id, Some(ACTION_TRACK_REMOVE), None).await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -111,7 +120,7 @@ pub async fn handle_callback(bot: Bot, query: CallbackQuery, db: Db) -> Response
             .await?;
         }
         "track:list" => {
-            let _ = db::clear_pending_action(&db, user_id).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
             let chat_id = query
                 .message
                 .as_ref()
@@ -121,7 +130,7 @@ pub async fn handle_callback(bot: Bot, query: CallbackQuery, db: Db) -> Response
             bot.answer_callback_query(query.id).await?;
         }
         "track:status" => {
-            let _ = db::clear_pending_action(&db, user_id).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
             let chat_id = query
                 .message
                 .as_ref()
@@ -130,8 +139,35 @@ pub async fn handle_callback(bot: Bot, query: CallbackQuery, db: Db) -> Response
             send_track_status(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
+        "track:skip_label" => {
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            match db::get_pending_state(&db, user_id).await {
+                Ok((Some(action), data)) if action == ACTION_TRACK_ADD_LABEL => {
+                    if let Some(wallet_address) = data {
+                        finalize_track_add(&bot, chat_id, &db, user_id, &wallet_address, None)
+                            .await?;
+                    } else {
+                        let _ = db::clear_pending_state(&db, user_id).await;
+                        send_track_menu(&bot, chat_id).await?;
+                    }
+                }
+                Ok(_) => {
+                    let _ = db::clear_pending_state(&db, user_id).await;
+                    send_track_menu(&bot, chat_id).await?;
+                }
+                Err(_err) => {
+                    bot.send_message(chat_id, "Sorry, I couldn't update that request.")
+                        .await?;
+                }
+            }
+            bot.answer_callback_query(query.id).await?;
+        }
         "action:cancel" => {
-            let _ = db::clear_pending_action(&db, user_id).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
             send_callback_menu(&bot, &query, "Track menu:", track_menu_markup()).await?;
         }
         _ => {
@@ -153,9 +189,7 @@ async fn handle_top_level_command(
         "help" => handle_help(bot, msg).await?,
         "track" => {
             let _ = db::set_mode(db, user_id, "track").await;
-            bot.send_message(msg.chat.id, "Track menu:")
-                .reply_markup(track_menu_markup())
-                .await?;
+            send_track_menu(&bot, msg.chat.id).await?;
         }
         "manage" => {
             let _ = db::set_mode(db, user_id, "manage").await;
@@ -194,10 +228,11 @@ async fn handle_pending_action(
     db: &Db,
     user_id: i64,
     action: &str,
+    data: Option<&str>,
     input: &str,
 ) -> ResponseResult<()> {
     match action {
-        ACTION_TRACK_ADD => {
+        ACTION_TRACK_ADD_ADDRESS => {
             if !is_valid_wallet_address(input) {
                 bot.send_message(msg.chat.id, "That wallet address looks invalid. Expected 0x + 40 hex characters.")
                     .await?;
@@ -205,28 +240,39 @@ async fn handle_pending_action(
             }
 
             let wallet_address = normalize_wallet_address(input);
-            let inserted = match db::add_tracked_wallet(db, user_id, &wallet_address, None).await
+            if let Err(_err) = db::set_pending_state(
+                db,
+                user_id,
+                Some(ACTION_TRACK_ADD_LABEL),
+                Some(&wallet_address),
+            )
+            .await
             {
-                Ok(inserted) => inserted,
-                Err(_err) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't add that wallet. Try again soon.")
-                        .await?;
-                    return Ok(());
-                }
+                bot.send_message(msg.chat.id, "Sorry, I couldn't continue that request. Try again soon.")
+                    .await?;
+                return Ok(());
+            }
+            bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
+                .reply_markup(label_menu_markup())
+                .await?;
+        }
+        ACTION_TRACK_ADD_LABEL => {
+            let Some(wallet_address) = data else {
+                let _ = db::clear_pending_state(db, user_id).await;
+                bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
+                    .await?;
+                return Ok(());
             };
 
-            let _ = db::clear_pending_action(db, user_id).await;
-
-            if inserted {
-                bot.send_message(msg.chat.id, format!("Added wallet {wallet_address}."))
+            let label = input.trim();
+            if label.is_empty() {
+                bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
+                    .reply_markup(label_menu_markup())
                     .await?;
-            } else {
-                bot.send_message(msg.chat.id, "That wallet is already being tracked.")
-                    .await?;
+                return Ok(());
             }
 
-            bot.send_message(msg.chat.id, "Track menu:")
-                .reply_markup(track_menu_markup())
+            finalize_track_add(&bot, msg.chat.id, db, user_id, wallet_address, Some(label))
                 .await?;
         }
         ACTION_TRACK_REMOVE => {
@@ -246,7 +292,7 @@ async fn handle_pending_action(
                 }
             };
 
-            let _ = db::clear_pending_action(db, user_id).await;
+            let _ = db::clear_pending_state(db, user_id).await;
 
             if removed {
                 bot.send_message(msg.chat.id, format!("Stopped tracking {wallet_address}."))
@@ -256,12 +302,10 @@ async fn handle_pending_action(
                     .await?;
             }
 
-            bot.send_message(msg.chat.id, "Track menu:")
-                .reply_markup(track_menu_markup())
-                .await?;
+            send_track_menu(&bot, msg.chat.id).await?;
         }
         _ => {
-            let _ = db::clear_pending_action(db, user_id).await;
+            let _ = db::clear_pending_state(db, user_id).await;
             bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
                 .await?;
         }
@@ -326,6 +370,13 @@ fn track_menu_markup() -> InlineKeyboardMarkup {
     ])
 }
 
+fn label_menu_markup() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback("Skip label", "track:skip_label")],
+        vec![InlineKeyboardButton::callback("Cancel", "action:cancel")],
+    ])
+}
+
 fn manage_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback("Back", "menu:main")]])
 }
@@ -351,6 +402,47 @@ async fn send_callback_menu(
     }
 
     bot.answer_callback_query(query.id.clone()).await?;
+    Ok(())
+}
+
+async fn send_track_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(chat_id, "Track menu:")
+        .reply_markup(track_menu_markup())
+        .await?;
+    Ok(())
+}
+
+async fn finalize_track_add(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    label: Option<&str>,
+) -> ResponseResult<()> {
+    let inserted = match db::add_tracked_wallet(db, user_id, wallet_address, label).await {
+        Ok(inserted) => inserted,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't add that wallet. Try again soon.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let _ = db::clear_pending_state(db, user_id).await;
+
+    if inserted {
+        let response = match label {
+            Some(label) => format!("Added wallet {wallet_address} as {label}.",),
+            None => format!("Added wallet {wallet_address}.",),
+        };
+        bot.send_message(chat_id, response).await?;
+    } else {
+        bot.send_message(chat_id, "That wallet is already being tracked.")
+            .await?;
+    }
+
+    send_track_menu(bot, chat_id).await?;
     Ok(())
 }
 

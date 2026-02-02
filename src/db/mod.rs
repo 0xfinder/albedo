@@ -47,9 +47,15 @@ pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn set_pending_action(db: &Db, user_id: i64, action: &str) -> Result<()> {
-    sqlx::query("UPDATE users SET pending_action = ? WHERE id = ?")
+pub async fn set_pending_state(
+    db: &Db,
+    user_id: i64,
+    action: Option<&str>,
+    data: Option<&str>,
+) -> Result<()> {
+    sqlx::query("UPDATE users SET pending_action = ?, pending_data = ? WHERE id = ?")
         .bind(action)
+        .bind(data)
         .bind(user_id)
         .execute(db)
         .await?;
@@ -57,24 +63,19 @@ pub async fn set_pending_action(db: &Db, user_id: i64, action: &str) -> Result<(
     Ok(())
 }
 
-pub async fn clear_pending_action(db: &Db, user_id: i64) -> Result<()> {
-    sqlx::query("UPDATE users SET pending_action = NULL WHERE id = ?")
-        .bind(user_id)
-        .execute(db)
-        .await?;
-
-    Ok(())
+pub async fn clear_pending_state(db: &Db, user_id: i64) -> Result<()> {
+    set_pending_state(db, user_id, None, None).await
 }
 
-pub async fn get_pending_action(db: &Db, user_id: i64) -> Result<Option<String>> {
-    let (action,) = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT pending_action FROM users WHERE id = ?",
+pub async fn get_pending_state(db: &Db, user_id: i64) -> Result<(Option<String>, Option<String>)> {
+    let (action, data) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT pending_action, pending_data FROM users WHERE id = ?",
     )
     .bind(user_id)
     .fetch_one(db)
     .await?;
 
-    Ok(action)
+    Ok((action, data))
 }
 
 pub async fn add_tracked_wallet(

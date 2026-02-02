@@ -8,6 +8,8 @@ pub struct User {
     pub telegram_id: i64,
     pub chat_id: i64,
     pub current_mode: String,
+    pub pending_action: Option<String>,
+    pub pending_data: Option<String>,
     pub created_at: String,
     pub last_active: String,
 }

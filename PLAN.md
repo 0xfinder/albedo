@@ -81,6 +81,7 @@ CREATE TABLE users (
   chat_id BIGINT NOT NULL,
   current_mode TEXT CHECK(current_mode IN ('none', 'track', 'manage')) DEFAULT 'none',
   pending_action TEXT,
+  pending_data TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
