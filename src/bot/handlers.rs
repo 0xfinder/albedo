@@ -114,6 +114,12 @@ async fn handle_track_add(
         return Ok(());
     };
 
+    if !is_valid_wallet_address(address) {
+        bot.send_message(msg.chat.id, "That wallet address looks invalid. Expected 0x + 40 hex characters.")
+            .await?;
+        return Ok(());
+    }
+
     let wallet_address = normalize_wallet_address(address);
     let label = if args.len() > 1 {
         Some(args[1..].join(" "))
@@ -232,6 +238,19 @@ async fn handle_manage_mode(bot: Bot, msg: Message, db: &Db, user_id: i64) -> Re
 
 fn normalize_wallet_address(raw: &str) -> String {
     raw.trim().to_lowercase()
+}
+
+fn is_valid_wallet_address(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with("0x") {
+        return false;
+    }
+
+    if trimmed.len() != 42 {
+        return false;
+    }
+
+    trimmed[2..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn track_manage_keyboard() -> KeyboardMarkup {
