@@ -71,6 +71,7 @@ aes-gcm = "0.10"
 - `DATABASE_URL` (default: `sqlite://bot.db`)
 - `ENCRYPTION_KEY` (required when storing private keys)
 - `POLYMARKET_API_URL` (default: `https://clob.polymarket.com`)
+- `POLYMARKET_WS_ASSET_IDS` (comma-separated asset IDs for WS monitoring)
 
 ## Database Schema (SQLite)
 ```
