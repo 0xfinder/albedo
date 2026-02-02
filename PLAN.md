@@ -71,7 +71,7 @@ aes-gcm = "0.10"
 - `DATABASE_URL` (default: `sqlite://bot.db`)
 - `ENCRYPTION_KEY` (required when storing private keys)
 - `POLYMARKET_API_URL` (default: `https://clob.polymarket.com`)
-- `POLYMARKET_DATA_POLL_SECONDS` (default: `60`)
+- `POLYMARKET_DATA_POLL_SECONDS` (default: `1`)
 - `POLYMARKET_API_KEY` (WS user events)
 - `POLYMARKET_API_SECRET` (WS user events)
 - `POLYMARKET_API_PASSPHRASE` (WS user events)

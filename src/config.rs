@@ -28,7 +28,7 @@ impl Config {
         let data_poll_seconds = env::var("POLYMARKET_DATA_POLL_SECONDS")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(60);
+            .unwrap_or(1);
         let ws_credentials = read_ws_credentials();
 
         Ok(Self {
