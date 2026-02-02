@@ -1,12 +1,15 @@
 pub mod models;
 
 use color_eyre::eyre::Result;
+use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
+use std::str::FromStr;
 
 pub type Db = SqlitePool;
 
 pub async fn init(database_url: &str) -> Result<Db> {
-    let pool = SqlitePool::connect(database_url).await?;
+    let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
+    let pool = SqlitePool::connect_with(options).await?;
 
     sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
     

@@ -68,7 +68,7 @@ aes-gcm = "0.10"
 
 ## Environment Variables
 - `TELEGRAM_TOKEN` (required for Phase 0)
-- `DATABASE_URL` (default: `sqlite:bot.db`)
+- `DATABASE_URL` (default: `sqlite://bot.db`)
 - `ENCRYPTION_KEY` (required when storing private keys)
 - `POLYMARKET_API_URL` (default: `https://clob.polymarket.com`)
 
