@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+#[allow(dead_code)]
 #[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct User {
     pub id: i64,
@@ -20,6 +21,7 @@ pub struct TrackedWallet {
     pub created_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct PositionSnapshot {
     pub id: i64,
@@ -33,6 +35,7 @@ pub struct PositionSnapshot {
     pub snapshot_time: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct ManagedWallet {
     pub id: i64,
@@ -43,6 +46,7 @@ pub struct ManagedWallet {
     pub created_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct ActivityLog {
     pub id: i64,
