@@ -199,8 +199,9 @@ pub async fn get_managed_wallet(
 
 pub async fn list_managed_wallets_with_users(db: &Db) -> Result<Vec<ManagedWalletWithUser>> {
     let wallets = sqlx::query_as::<_, ManagedWalletWithUser>(
-        "SELECT managed_wallets.user_id, users.chat_id, managed_wallets.wallet_address, managed_wallets.label, managed_wallets.encrypted_key, managed_wallets.nonce\
-         FROM managed_wallets\
+        "SELECT managed_wallets.user_id, users.chat_id, managed_wallets.wallet_address, \
+         managed_wallets.label, managed_wallets.encrypted_key, managed_wallets.nonce \
+         FROM managed_wallets \
          INNER JOIN users ON users.id = managed_wallets.user_id",
     )
     .fetch_all(db)
@@ -223,8 +224,9 @@ pub async fn remove_managed_wallet(db: &Db, user_id: i64, wallet_address: &str) 
 
 pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalletWithUser>> {
     let wallets = sqlx::query_as::<_, TrackedWalletWithUser>(
-        "SELECT tracked_wallets.user_id, users.chat_id, tracked_wallets.wallet_address, tracked_wallets.label, tracked_wallets.last_activity_hash, tracked_wallets.last_positions_hash\
-         FROM tracked_wallets\
+        "SELECT tracked_wallets.user_id, users.chat_id, tracked_wallets.wallet_address, \
+         tracked_wallets.label, tracked_wallets.last_activity_hash, tracked_wallets.last_positions_hash \
+         FROM tracked_wallets \
          INNER JOIN users ON users.id = tracked_wallets.user_id",
     )
     .fetch_all(db)
@@ -303,7 +305,8 @@ pub async fn insert_activity_log(
     notified: bool,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "INSERT OR IGNORE INTO activity_log (user_id, wallet_address, activity_type, market_slug, transaction_hash, activity_timestamp, details, notified)\
+        "INSERT OR IGNORE INTO activity_log (user_id, wallet_address, activity_type, market_slug, \
+         transaction_hash, activity_timestamp, details, notified) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(user_id)

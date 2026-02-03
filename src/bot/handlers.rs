@@ -1169,11 +1169,8 @@ async fn send_track_status(
         }
     };
 
-    bot.send_message(
-        chat_id,
-        format!("Tracking {count} wallet(s). Monitoring is not enabled yet."),
-    )
-    .await?;
+    bot.send_message(chat_id, format!("Tracking {count} wallet(s)."))
+        .await?;
     Ok(())
 }
 
