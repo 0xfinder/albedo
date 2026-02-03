@@ -5,8 +5,8 @@
 - Track flow supports add/remove/list/status with label prompts.
 - Manage flow supports auth/list/positions/market+limit orders/cancel/remove with encrypted keys.
 - SQLite database with migrations and tracking state fields.
-- Data API polling for tracked wallets (activity + positions).
-- WS user events connect for managed wallets (no notifications yet).
+- Data API polling for tracked wallets (activity + positions) with normalized, deduped activity alerts.
+- WS user events connect for managed wallets with backoff and trade/order notifications.
 
 ## What Works Now
 - `/start` clears reply keyboard and shows Track/Manage menu.
@@ -24,16 +24,13 @@
   - Remove wallet -> deletes managed wallet.
 - Polling task:
   - Fetches `/activity` and `/positions` per tracked wallet.
+  - Normalizes activity notifications and deduplicates by tx hash + timestamp.
   - Sends Telegram notifications for new activity.
   - Sends a simple notification on position changes.
 - WS user events:
-- Connects for managed wallets, but does not yet emit messages.
+  - Connects for managed wallets with reconnect/backoff and emits trade/order messages.
 
 ## What’s Left
-- Monitoring pipeline:
-  - Normalize activity messages into structured notifications.
-  - Deduplicate activity by tx hash + timestamp.
-  - Add reconnect/backoff for WS.
 - Track mode improvements:
   - Inline remove buttons in list.
   - Better status (last poll time, WS state).

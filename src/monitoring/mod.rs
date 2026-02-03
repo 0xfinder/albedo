@@ -2,19 +2,26 @@ use futures::{Stream, StreamExt};
 use polymarket_client_sdk::auth::{Credentials, LocalSigner, Signer, Uuid};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::ws::Client as WsClient;
+use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
 use polymarket_client_sdk::data::types::request::{ActivityRequest, PositionsRequest};
+use polymarket_client_sdk::data::types::response::Activity;
 use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal};
 use polymarket_client_sdk::POLYGON;
+use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use teloxide::prelude::Requester;
 
 use crate::config::WsCredentialsConfig;
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
+
+const WS_BACKOFF_INITIAL_MS: u64 = 1000;
+const WS_BACKOFF_MAX_MS: u64 = 30_000;
+const WS_BACKOFF_RESET_AFTER_SECS: u64 = 60;
 
 pub fn spawn_data_polling(
     bot: teloxide::prelude::Bot,
@@ -53,7 +60,7 @@ pub fn spawn_data_polling(
 }
 
 pub fn spawn_ws_user_events(
-    _bot: teloxide::prelude::Bot,
+    bot: teloxide::prelude::Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
     ws_credentials: Option<WsCredentialsConfig>,
@@ -77,31 +84,105 @@ pub fn spawn_ws_user_events(
 
             for wallet in wallets {
                 let encryption_key = encryption_key;
+                let db = db.clone();
+                let bot = bot.clone();
                 tokio::spawn(async move {
-                    let _ = connect_user_events(wallet, encryption_key).await;
+                    let _ = connect_user_events(wallet, db, bot, encryption_key).await;
                 });
             }
         }
     }))
 }
 
-async fn consume_user_event_stream<S, T, E>(mut stream: S) -> usize
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamExit {
+    End,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StreamOutcome {
+    ok_count: usize,
+    exit: StreamExit,
+}
+
+async fn consume_user_event_stream<S, T, E>(mut stream: S) -> StreamOutcome
 where
     S: Stream<Item = Result<T, E>> + Unpin,
 {
     let mut ok_count = 0;
     while let Some(event) = stream.next().await {
-        if event.is_err() {
-            break;
+        match event {
+            Ok(_) => ok_count += 1,
+            Err(_) => return StreamOutcome {
+                ok_count,
+                exit: StreamExit::Error,
+            },
         }
-        ok_count += 1;
     }
-    ok_count
+
+    StreamOutcome {
+        ok_count,
+        exit: StreamExit::End,
+    }
+}
+
+async fn consume_user_event_stream_with_handler<S, F, Fut, E>(mut stream: S, mut handler: F) -> StreamOutcome
+where
+    S: Stream<Item = Result<WsMessage, E>> + Unpin,
+    F: FnMut(WsMessage) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut ok_count = 0;
+    while let Some(event) = stream.next().await {
+        match event {
+            Ok(message) => {
+                handler(message).await;
+                ok_count += 1;
+            }
+            Err(_) => {
+                return StreamOutcome {
+                    ok_count,
+                    exit: StreamExit::Error,
+                }
+            }
+        }
+    }
+
+    StreamOutcome {
+        ok_count,
+        exit: StreamExit::End,
+    }
+}
+
+async fn run_ws_with_backoff<F, Fut>(mut connect: F) -> color_eyre::eyre::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = color_eyre::eyre::Result<StreamOutcome>>,
+{
+    let mut backoff = Duration::from_millis(WS_BACKOFF_INITIAL_MS);
+    loop {
+        let started = Instant::now();
+        let _ = connect().await;
+        let elapsed = started.elapsed();
+        if elapsed >= Duration::from_secs(WS_BACKOFF_RESET_AFTER_SECS) {
+            backoff = Duration::from_millis(WS_BACKOFF_INITIAL_MS);
+        }
+
+        tokio::time::sleep(backoff).await;
+        backoff = std::cmp::min(backoff.saturating_mul(2), Duration::from_millis(WS_BACKOFF_MAX_MS));
+    }
 }
 
 async fn connect_env_user_events(
     credentials: WsCredentialsConfig,
 ) -> color_eyre::eyre::Result<()> {
+    run_ws_with_backoff(|| connect_env_user_events_once(credentials.clone())).await
+}
+
+async fn connect_env_user_events_once(
+    credentials: WsCredentialsConfig,
+) -> color_eyre::eyre::Result<StreamOutcome> {
     let api_key = Uuid::parse_str(&credentials.api_key)?;
     let address = Address::from_str(&credentials.address)?;
     let credentials = Credentials::new(
@@ -112,15 +193,24 @@ async fn connect_env_user_events(
 
     let client = WsClient::default().authenticate(credentials, address)?;
     let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
-    let _ = consume_user_event_stream(stream).await;
-
-    Ok(())
+    Ok(consume_user_event_stream(stream).await)
 }
 
 async fn connect_user_events(
     wallet: db::ManagedWalletWithUser,
+    db: Db,
+    bot: teloxide::prelude::Bot,
     encryption_key: EncryptionKey,
 ) -> color_eyre::eyre::Result<()> {
+    run_ws_with_backoff(|| connect_user_events_once(&wallet, &db, &bot, encryption_key)).await
+}
+
+async fn connect_user_events_once(
+    wallet: &db::ManagedWalletWithUser,
+    db: &Db,
+    bot: &teloxide::prelude::Bot,
+    encryption_key: EncryptionKey,
+) -> color_eyre::eyre::Result<StreamOutcome> {
     let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key)?;
     let private_key = String::from_utf8(decrypted)?;
     let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
@@ -132,21 +222,23 @@ async fn connect_user_events(
 
     let client = WsClient::default().authenticate(credentials, address)?;
     let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
-    let _ = consume_user_event_stream(stream).await;
-
-    Ok(())
+    Ok(consume_user_event_stream_with_handler(stream, |message| async {
+        handle_ws_message(bot, db, wallet, message).await;
+    })
+    .await)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::consume_user_event_stream;
+    use super::{consume_user_event_stream, StreamExit};
     use futures::stream;
 
     #[tokio::test]
     async fn consume_events_stops_on_error() {
         let events = stream::iter(vec![Ok("one"), Ok("two"), Err("boom"), Ok("three")]);
-        let count = consume_user_event_stream(events).await;
-        assert_eq!(count, 2);
+        let outcome = consume_user_event_stream(events).await;
+        assert_eq!(outcome.ok_count, 2);
+        assert_eq!(outcome.exit, StreamExit::Error);
     }
 
     #[tokio::test]
@@ -156,8 +248,9 @@ mod tests {
             Ok(2u8),
             Ok(3u8),
         ]);
-        let count = consume_user_event_stream(events).await;
-        assert_eq!(count, 3);
+        let outcome = consume_user_event_stream(events).await;
+        assert_eq!(outcome.ok_count, 3);
+        assert_eq!(outcome.exit, StreamExit::End);
     }
 }
 
@@ -224,21 +317,30 @@ async fn poll_activity(
         .as_deref()
         .unwrap_or(wallet.wallet_address.as_str());
     for activity in new_events.into_iter().rev() {
-        let title = activity.title.as_deref().unwrap_or("Unknown market");
-        let side = activity
-            .side
-            .as_ref()
-            .map(|side| format!("{:?}", side))
-            .unwrap_or_else(|| "N/A".to_string());
-        let size = format_decimal(activity.size);
-        let price = activity
-            .price
-            .map(format_decimal)
-            .unwrap_or_else(|| "N/A".to_string());
-        let message = format!(
-            "New activity for {label}: {activity:?}\n{title}\nSide: {side} Size: {size} Price: {price}",
-            activity = activity.activity_type
-        );
+        let notification = ActivityNotification::from_activity(activity);
+        let details = serde_json::to_string(&notification).ok();
+        let inserted = match db::insert_activity_log(
+            db,
+            wallet.user_id,
+            &wallet.wallet_address,
+            &notification.activity_type,
+            notification.market_slug.as_deref(),
+            &notification.tx_hash,
+            notification.timestamp,
+            details.as_deref(),
+            true,
+        )
+        .await
+        {
+            Ok(inserted) => inserted,
+            Err(_) => false,
+        };
+
+        if !inserted {
+            continue;
+        }
+
+        let message = format_activity_message(label, &notification);
         let _ = bot
             .send_message(teloxide::types::ChatId(wallet.chat_id), message)
             .await;
@@ -319,4 +421,171 @@ fn hash_positions(positions: &[polymarket_client_sdk::data::types::response::Pos
 
 fn format_decimal(value: Decimal) -> String {
     value.normalize().to_string()
+}
+
+#[derive(Debug, Serialize)]
+struct ActivityNotification {
+    activity_type: String,
+    market: String,
+    market_slug: Option<String>,
+    outcome: Option<String>,
+    side: Option<String>,
+    size: String,
+    usdc_size: String,
+    price: Option<String>,
+    timestamp: i64,
+    tx_hash: String,
+}
+
+impl ActivityNotification {
+    fn from_activity(activity: &Activity) -> Self {
+        let market = activity
+            .title
+            .clone()
+            .or_else(|| activity.slug.clone())
+            .unwrap_or_else(|| "Unknown market".to_string());
+        Self {
+            activity_type: format!("{:?}", activity.activity_type),
+            market,
+            market_slug: activity.slug.clone(),
+            outcome: activity.outcome.clone(),
+            side: activity.side.as_ref().map(|side| format!("{:?}", side)),
+            size: format_decimal(activity.size),
+            usdc_size: format_decimal(activity.usdc_size),
+            price: activity.price.map(format_decimal),
+            timestamp: activity.timestamp,
+            tx_hash: activity.transaction_hash.to_string(),
+        }
+    }
+}
+
+fn format_activity_message(label: &str, notification: &ActivityNotification) -> String {
+    let outcome = notification.outcome.as_deref().unwrap_or("N/A");
+    let side = notification.side.as_deref().unwrap_or("N/A");
+    let price = notification.price.as_deref().unwrap_or("N/A");
+    format!(
+        "Activity for {label}\n{activity_type}: {market}\nOutcome: {outcome} | Side: {side}\nSize: {size} | USDC: {usdc} | Price: {price}\nTx: {tx} | Time: {timestamp}",
+        activity_type = notification.activity_type,
+        market = notification.market,
+        size = notification.size,
+        usdc = notification.usdc_size,
+        tx = notification.tx_hash,
+        timestamp = notification.timestamp,
+    )
+}
+
+async fn handle_ws_message(
+    bot: &teloxide::prelude::Bot,
+    db: &Db,
+    wallet: &db::ManagedWalletWithUser,
+    message: WsMessage,
+) {
+    let label = wallet
+        .label
+        .as_deref()
+        .unwrap_or(wallet.wallet_address.as_str());
+
+    match message {
+        WsMessage::Trade(trade) => {
+            let mut should_send = true;
+            let timestamp = trade
+                .timestamp
+                .or(trade.matchtime)
+                .or(trade.last_update);
+            let tx_hash = trade.transaction_hash.map(|hash| hash.to_string());
+            if let (Some(tx_hash), Some(timestamp)) = (tx_hash.as_deref(), timestamp) {
+                match db::insert_activity_log(
+                    db,
+                    wallet.user_id,
+                    &wallet.wallet_address,
+                    "WS_TRADE",
+                    None,
+                    tx_hash,
+                    timestamp,
+                    None,
+                    true,
+                )
+                .await
+                {
+                    Ok(inserted) => should_send = inserted,
+                    Err(_) => should_send = true,
+                }
+            }
+
+            if !should_send {
+                return;
+            }
+
+            let message = format_ws_trade_message(label, &trade);
+            let _ = bot
+                .send_message(teloxide::types::ChatId(wallet.chat_id), message)
+                .await;
+        }
+        WsMessage::Order(order) => {
+            let message = format_ws_order_message(label, &order);
+            let _ = bot
+                .send_message(teloxide::types::ChatId(wallet.chat_id), message)
+                .await;
+        }
+        _ => {}
+    }
+}
+
+fn format_ws_trade_message(label: &str, trade: &TradeMessage) -> String {
+    let status = format!("{:?}", trade.status);
+    let side = format!("{:?}", trade.side);
+    let role = trade
+        .trader_side
+        .as_ref()
+        .map(|side| format!("{:?}", side))
+        .unwrap_or_else(|| "N/A".to_string());
+    let outcome = trade.outcome.as_deref().unwrap_or("N/A");
+    let timestamp = trade
+        .timestamp
+        .or(trade.matchtime)
+        .or(trade.last_update)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "N/A".to_string());
+    let tx_hash = trade
+        .transaction_hash
+        .map(|hash| hash.to_string())
+        .unwrap_or_else(|| "N/A".to_string());
+
+    format!(
+        "Trade for {label}\nStatus: {status} | Side: {side} | Role: {role}\nMarket: {market}\nAsset: {asset}\nOutcome: {outcome}\nSize: {size} @ {price}\nTx: {tx_hash} | Time: {timestamp}",
+        market = trade.market,
+        asset = trade.asset_id,
+        size = format_decimal(trade.size),
+        price = format_decimal(trade.price),
+    )
+}
+
+fn format_ws_order_message(label: &str, order: &OrderMessage) -> String {
+    let msg_type = order
+        .msg_type
+        .as_ref()
+        .map(|msg_type| format!("{:?}", msg_type))
+        .unwrap_or_else(|| "Update".to_string());
+    let outcome = order.outcome.as_deref().unwrap_or("N/A");
+    let timestamp = order
+        .timestamp
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "N/A".to_string());
+    let original_size = format_optional_decimal(order.original_size);
+    let matched = format_optional_decimal(order.size_matched);
+
+    format!(
+        "Order for {label}\nType: {msg_type}\nOrder: {id}\nMarket: {market}\nAsset: {asset}\nSide: {side} | Outcome: {outcome}\nPrice: {price} | Original: {original_size} | Matched: {matched}\nTime: {timestamp}",
+        id = order.id,
+        market = order.market,
+        asset = order.asset_id,
+        side = format!("{:?}", order.side),
+        price = format_decimal(order.price),
+    )
+}
+
+fn format_optional_decimal(value: Option<Decimal>) -> String {
+    value
+        .map(format_decimal)
+        .unwrap_or_else(|| "N/A".to_string())
 }

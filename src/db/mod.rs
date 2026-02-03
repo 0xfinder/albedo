@@ -290,3 +290,32 @@ pub async fn update_tracked_wallet_positions_hash(
 
     Ok(())
 }
+
+pub async fn insert_activity_log(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    activity_type: &str,
+    market_slug: Option<&str>,
+    transaction_hash: &str,
+    activity_timestamp: i64,
+    details: Option<&str>,
+    notified: bool,
+) -> Result<bool> {
+    let result = sqlx::query(
+        "INSERT OR IGNORE INTO activity_log (user_id, wallet_address, activity_type, market_slug, transaction_hash, activity_timestamp, details, notified)\
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(wallet_address)
+    .bind(activity_type)
+    .bind(market_slug)
+    .bind(transaction_hash)
+    .bind(activity_timestamp)
+    .bind(details)
+    .bind(notified)
+    .execute(db)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}

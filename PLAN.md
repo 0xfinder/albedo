@@ -34,7 +34,7 @@
 │ - tracked_wallets (user_id, address, label)         │
 │ - position_snapshots (wallet, market, data, time)   │
 │ - managed_wallets (user_id, encrypted_key, nonce)   │
-│ - activity_log (wallet, type, details)              │
+│ - activity_log (wallet, type, tx hash, timestamp)   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -133,9 +133,12 @@ CREATE TABLE managed_wallets (
 -- Activity log (for notifications)
 CREATE TABLE activity_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
   wallet_address TEXT NOT NULL,
   activity_type TEXT NOT NULL,
   market_slug TEXT,
+  transaction_hash TEXT,
+  activity_timestamp INTEGER,
   details TEXT,
   notified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -152,8 +155,12 @@ Example indexes:
 CREATE INDEX IF NOT EXISTS idx_tracked_wallets_user_id ON tracked_wallets(user_id);
 CREATE INDEX IF NOT EXISTS idx_position_snapshots_wallet_address ON position_snapshots(wallet_address);
 CREATE INDEX IF NOT EXISTS idx_managed_wallets_user_id ON managed_wallets(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_log_user_id ON activity_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_log_notified ON activity_log(notified);
 CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_log_dedupe
+  ON activity_log(user_id, wallet_address, transaction_hash, activity_timestamp)
+  WHERE user_id IS NOT NULL AND transaction_hash IS NOT NULL AND activity_timestamp IS NOT NULL;
 ```
 
 ## File Structure (Target)

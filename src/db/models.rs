@@ -55,9 +55,12 @@ pub struct ManagedWallet {
 #[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct ActivityLog {
     pub id: i64,
+    pub user_id: Option<i64>,
     pub wallet_address: String,
     pub activity_type: String,
     pub market_slug: Option<String>,
+    pub transaction_hash: Option<String>,
+    pub activity_timestamp: Option<i64>,
     pub details: Option<String>,
     pub notified: bool,
     pub created_at: String,
