@@ -3,17 +3,20 @@ use polymarket_client_sdk::auth::{Credentials, LocalSigner, Signer, Uuid};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::ws::Client as WsClient;
 use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
-use polymarket_client_sdk::data::types::request::{ActivityRequest, PositionsRequest};
+use polymarket_client_sdk::data::types::request::{ActivityRequest, PositionsRequest, TradesRequest};
 use polymarket_client_sdk::data::types::response::Activity;
+use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::Client as DataClient;
-use polymarket_client_sdk::types::{Address, Decimal};
+use polymarket_client_sdk::types::{Address, B256, Decimal};
 use polymarket_client_sdk::POLYGON;
 use serde::Serialize;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use teloxide::prelude::Requester;
+use tokio::sync::Mutex;
 
 use crate::config::WsCredentialsConfig;
 use crate::db::{self, Db};
@@ -22,6 +25,8 @@ use crate::utils::crypto::{self, EncryptionKey};
 const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
 const WS_BACKOFF_RESET_AFTER_SECS: u64 = 60;
+
+type MarketCache = Arc<Mutex<HashMap<String, MarketInfo>>>;
 
 pub fn spawn_data_polling(
     bot: teloxide::prelude::Bot,
@@ -222,8 +227,15 @@ async fn connect_user_events_once(
 
     let client = WsClient::default().authenticate(credentials, address)?;
     let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
-    Ok(consume_user_event_stream_with_handler(stream, |message| async {
-        handle_ws_message(bot, db, wallet, message).await;
+    let data_client = DataClient::default();
+    let market_cache: MarketCache = Arc::new(Mutex::new(HashMap::new()));
+
+    Ok(consume_user_event_stream_with_handler(stream, |message| {
+        let data_client = data_client.clone();
+        let market_cache = market_cache.clone();
+        async move {
+            handle_ws_message(bot, db, wallet, message, &data_client, &market_cache).await;
+        }
     })
     .await)
 }
@@ -437,6 +449,12 @@ struct ActivityNotification {
     tx_hash: String,
 }
 
+#[derive(Debug, Clone)]
+struct MarketInfo {
+    title: String,
+    slug: Option<String>,
+}
+
 impl ActivityNotification {
     fn from_activity(activity: &Activity) -> Self {
         let market = activity
@@ -479,6 +497,8 @@ async fn handle_ws_message(
     db: &Db,
     wallet: &db::ManagedWalletWithUser,
     message: WsMessage,
+    data_client: &DataClient,
+    market_cache: &MarketCache,
 ) {
     let label = wallet
         .label
@@ -487,6 +507,7 @@ async fn handle_ws_message(
 
     match message {
         WsMessage::Trade(trade) => {
+            let market_label = resolve_market_label(data_client, market_cache, trade.market).await;
             let mut should_send = true;
             let timestamp = trade
                 .timestamp
@@ -516,13 +537,14 @@ async fn handle_ws_message(
                 return;
             }
 
-            let message = format_ws_trade_message(label, &trade);
+            let message = format_ws_trade_message(label, &trade, &market_label);
             let _ = bot
                 .send_message(teloxide::types::ChatId(wallet.chat_id), message)
                 .await;
         }
         WsMessage::Order(order) => {
-            let message = format_ws_order_message(label, &order);
+            let market_label = resolve_market_label(data_client, market_cache, order.market).await;
+            let message = format_ws_order_message(label, &order, &market_label);
             let _ = bot
                 .send_message(teloxide::types::ChatId(wallet.chat_id), message)
                 .await;
@@ -531,7 +553,52 @@ async fn handle_ws_message(
     }
 }
 
-fn format_ws_trade_message(label: &str, trade: &TradeMessage) -> String {
+async fn resolve_market_label(
+    client: &DataClient,
+    cache: &MarketCache,
+    market: B256,
+) -> String {
+    if let Some(info) = lookup_market_info(client, cache, market).await {
+        return format_market_label(&info);
+    }
+
+    market.to_string()
+}
+
+async fn lookup_market_info(
+    client: &DataClient,
+    cache: &MarketCache,
+    market: B256,
+) -> Option<MarketInfo> {
+    let key = market.to_string();
+    if let Some(info) = cache.lock().await.get(&key).cloned() {
+        return Some(info);
+    }
+
+    let builder = TradesRequest::builder()
+        .filter(MarketFilter::markets([market]))
+        .limit(1)
+        .ok()?;
+    let request = builder.build();
+    let trades = client.trades(&request).await.ok()?;
+    let trade = trades.first()?;
+    let info = MarketInfo {
+        title: trade.title.clone(),
+        slug: Some(trade.slug.clone()),
+    };
+
+    cache.lock().await.insert(key, info.clone());
+    Some(info)
+}
+
+fn format_market_label(info: &MarketInfo) -> String {
+    match info.slug.as_deref() {
+        Some(slug) => format!("{} ({slug})", info.title),
+        None => info.title.clone(),
+    }
+}
+
+fn format_ws_trade_message(label: &str, trade: &TradeMessage, market_label: &str) -> String {
     let status = format!("{:?}", trade.status);
     let side = format!("{:?}", trade.side);
     let role = trade
@@ -553,14 +620,14 @@ fn format_ws_trade_message(label: &str, trade: &TradeMessage) -> String {
 
     format!(
         "Trade for {label}\nStatus: {status} | Side: {side} | Role: {role}\nMarket: {market}\nAsset: {asset}\nOutcome: {outcome}\nSize: {size} @ {price}\nTx: {tx_hash} | Time: {timestamp}",
-        market = trade.market,
+        market = market_label,
         asset = trade.asset_id,
         size = format_decimal(trade.size),
         price = format_decimal(trade.price),
     )
 }
 
-fn format_ws_order_message(label: &str, order: &OrderMessage) -> String {
+fn format_ws_order_message(label: &str, order: &OrderMessage, market_label: &str) -> String {
     let msg_type = order
         .msg_type
         .as_ref()
@@ -577,7 +644,7 @@ fn format_ws_order_message(label: &str, order: &OrderMessage) -> String {
     format!(
         "Order for {label}\nType: {msg_type}\nOrder: {id}\nMarket: {market}\nAsset: {asset}\nSide: {side} | Outcome: {outcome}\nPrice: {price} | Original: {original_size} | Matched: {matched}\nTime: {timestamp}",
         id = order.id,
-        market = order.market,
+        market = market_label,
         asset = order.asset_id,
         side = format!("{:?}", order.side),
         price = format_decimal(order.price),
