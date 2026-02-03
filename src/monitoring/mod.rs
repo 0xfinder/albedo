@@ -1,9 +1,11 @@
 use futures::StreamExt;
-use polymarket_client_sdk::auth::{Credentials, Uuid};
+use polymarket_client_sdk::auth::{Credentials, LocalSigner, Signer, Uuid};
+use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::ws::Client as WsClient;
 use polymarket_client_sdk::data::types::request::{ActivityRequest, PositionsRequest};
 use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal};
+use polymarket_client_sdk::POLYGON;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -12,6 +14,7 @@ use teloxide::prelude::Requester;
 
 use crate::config::WsCredentialsConfig;
 use crate::db::{self, Db};
+use crate::utils::crypto::{self, EncryptionKey};
 
 pub fn spawn_data_polling(
     bot: teloxide::prelude::Bot,
@@ -51,45 +54,84 @@ pub fn spawn_data_polling(
 
 pub fn spawn_ws_user_events(
     _bot: teloxide::prelude::Bot,
-    _db: Db,
-    credentials: Option<WsCredentialsConfig>,
+    db: Db,
+    encryption_key: Option<EncryptionKey>,
+    ws_credentials: Option<WsCredentialsConfig>,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    let credentials = credentials?;
+    if encryption_key.is_none() && ws_credentials.is_none() {
+        return None;
+    }
 
     Some(tokio::spawn(async move {
-        let api_key = match Uuid::parse_str(&credentials.api_key) {
-            Ok(api_key) => api_key,
-            Err(_) => return,
-        };
+        if let Some(credentials) = ws_credentials {
+            tokio::spawn(async move {
+                let _ = connect_env_user_events(credentials).await;
+            });
+        }
 
-        let address = match Address::from_str(&credentials.address) {
-            Ok(address) => address,
-            Err(_) => return,
-        };
+        if let Some(encryption_key) = encryption_key {
+            let wallets = match db::list_managed_wallets_with_users(&db).await {
+                Ok(wallets) => wallets,
+                Err(_) => return,
+            };
 
-        let credentials = Credentials::new(
-            api_key,
-            credentials.api_secret,
-            credentials.api_passphrase,
-        );
-
-        let client = match WsClient::default().authenticate(credentials, address) {
-            Ok(client) => client,
-            Err(_) => return,
-        };
-
-        let stream = match client.subscribe_user_events(Vec::new()) {
-            Ok(stream) => stream,
-            Err(_) => return,
-        };
-
-        let mut stream = Box::pin(stream);
-        while let Some(event) = stream.next().await {
-            if event.is_err() {
-                break;
+            for wallet in wallets {
+                let encryption_key = encryption_key;
+                tokio::spawn(async move {
+                    let _ = connect_user_events(wallet, encryption_key).await;
+                });
             }
         }
     }))
+}
+
+async fn connect_env_user_events(
+    credentials: WsCredentialsConfig,
+) -> color_eyre::eyre::Result<()> {
+    let api_key = Uuid::parse_str(&credentials.api_key)?;
+    let address = Address::from_str(&credentials.address)?;
+    let credentials = Credentials::new(
+        api_key,
+        credentials.api_secret,
+        credentials.api_passphrase,
+    );
+
+    let client = WsClient::default().authenticate(credentials, address)?;
+    let stream = client.subscribe_user_events(Vec::new())?;
+    let mut stream = Box::pin(stream);
+    while let Some(event) = stream.next().await {
+        if event.is_err() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+async fn connect_user_events(
+    wallet: db::ManagedWalletWithUser,
+    encryption_key: EncryptionKey,
+) -> color_eyre::eyre::Result<()> {
+    let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key)?;
+    let private_key = String::from_utf8(decrypted)?;
+    let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
+
+    let address = signer.address();
+    let credentials = ClobClient::default()
+        .create_or_derive_api_key(&signer, None)
+        .await?;
+
+    let client = WsClient::default().authenticate(credentials, address)?;
+    let stream = client.subscribe_user_events(Vec::new())?;
+
+    let mut stream = Box::pin(stream);
+    while let Some(event) = stream.next().await {
+        if event.is_err() {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 async fn poll_activity(

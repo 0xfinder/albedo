@@ -2,11 +2,14 @@ use color_eyre::eyre::{Context, Result};
 use dotenv::dotenv;
 use std::env;
 
+use crate::utils::crypto::EncryptionKey;
+
 pub struct Config {
     pub telegram_token: String,
     pub database_url: String,
     pub data_poll_seconds: u64,
     pub ws_credentials: Option<WsCredentialsConfig>,
+    pub encryption_key: Option<EncryptionKey>,
 }
 
 #[derive(Clone, Debug)]
@@ -30,12 +33,14 @@ impl Config {
             .and_then(|value| value.parse().ok())
             .unwrap_or(1);
         let ws_credentials = read_ws_credentials();
+        let encryption_key = read_encryption_key()?;
 
         Ok(Self {
             telegram_token: env::var("TELEGRAM_TOKEN").context("TELEGRAM_TOKEN not set")?,
             database_url,
             data_poll_seconds,
             ws_credentials,
+            encryption_key,
         })
     }
 }
@@ -68,4 +73,13 @@ fn read_ws_credentials() -> Option<WsCredentialsConfig> {
         api_passphrase,
         address,
     })
+}
+
+fn read_encryption_key() -> Result<Option<EncryptionKey>> {
+    let value = match env::var("ENCRYPTION_KEY") {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+
+    Ok(Some(EncryptionKey::from_hex(&value)?))
 }

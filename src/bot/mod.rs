@@ -1,9 +1,14 @@
 pub mod handlers;
 
 use crate::db::Db;
+use crate::utils::crypto::EncryptionKey;
 use teloxide::{dptree, prelude::*};
 
-pub async fn start(bot: Bot, db: Db) -> color_eyre::eyre::Result<()> {
+pub async fn start(
+    bot: Bot,
+    db: Db,
+    encryption_key: Option<EncryptionKey>,
+) -> color_eyre::eyre::Result<()> {
     let me = bot.get_me().await?;
     let bot_name = me.user.username.unwrap_or_default();
 
@@ -12,7 +17,7 @@ pub async fn start(bot: Bot, db: Db) -> color_eyre::eyre::Result<()> {
         .branch(Update::filter_callback_query().endpoint(handlers::handle_callback));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![db, bot_name])
+        .dependencies(dptree::deps![db, bot_name, encryption_key])
         .enable_ctrlc_handler()
         .build()
         .dispatch()

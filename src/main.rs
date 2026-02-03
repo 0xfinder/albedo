@@ -4,6 +4,7 @@ mod bot;
 mod config;
 mod db;
 mod monitoring;
+mod utils;
 
 use color_eyre::eyre::Result;
 use teloxide::prelude::*;
@@ -30,11 +31,12 @@ async fn main() -> Result<()> {
     let _ws_handle = monitoring::spawn_ws_user_events(
         bot.clone(),
         db.clone(),
+        config.encryption_key,
         config.ws_credentials.clone(),
     );
 
     // Start bot dispatcher
-    bot::start(bot, db).await?;
+    bot::start(bot, db, config.encryption_key).await?;
     
     Ok(())
 }
