@@ -1,11 +1,12 @@
 # Progress
 
 ## Current Status
-- Telegram bot runs with inline menus.
+- Telegram bot runs with inline Track/Manage menus.
 - Track flow supports add/remove/list/status with label prompts.
+- Manage flow supports auth/list/positions/market+limit orders/cancel/remove with encrypted keys.
 - SQLite database with migrations and tracking state fields.
 - Data API polling for tracked wallets (activity + positions).
-- WS user events scaffold for managed wallets (env-based for now).
+- WS user events connect for managed wallets (no notifications yet).
 
 ## What Works Now
 - `/start` clears reply keyboard and shows Track/Manage menu.
@@ -14,18 +15,21 @@
   - Remove address -> deletes wallet.
   - View all -> shows tracked wallets + labels.
   - Status -> shows tracked count.
+- Manage menu actions:
+  - Auth wallet -> stores encrypted private key + optional label.
+  - List -> shows managed wallets + labels.
+  - Positions -> fetches open positions for a managed wallet.
+  - Market/limit orders -> submits orders for managed wallets.
+  - Cancel order -> cancels order id for a managed wallet.
+  - Remove wallet -> deletes managed wallet.
 - Polling task:
   - Fetches `/activity` and `/positions` per tracked wallet.
   - Sends Telegram notifications for new activity.
   - Sends a simple notification on position changes.
 - WS user events:
-  - Connects if credentials are set, but does not yet emit messages.
+- Connects for managed wallets, but does not yet emit messages.
 
 ## What’s Left
-- Manage mode:
-  - Authenticate wallet keys, store encrypted credentials.
-  - Map managed wallets to WS user events.
-  - Manage commands (list, positions, place/cancel orders).
 - Monitoring pipeline:
   - Normalize activity messages into structured notifications.
   - Deduplicate activity by tx hash + timestamp.

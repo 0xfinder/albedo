@@ -69,7 +69,7 @@ aes-gcm = "0.10"
 ## Environment Variables
 - `TELEGRAM_TOKEN` (required for Phase 0)
 - `DATABASE_URL` (default: `sqlite://bot.db`)
-- `ENCRYPTION_KEY` (required when storing private keys)
+- `ENCRYPTION_KEY` (32-byte hex, required when storing private keys)
 - `POLYMARKET_API_URL` (default: `https://clob.polymarket.com`)
 - `POLYMARKET_DATA_POLL_SECONDS` (default: `1`)
 - `POLYMARKET_API_KEY` (WS user events)
@@ -122,6 +122,7 @@ CREATE TABLE managed_wallets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   wallet_address TEXT NOT NULL,
+  label TEXT,
   encrypted_key BLOB NOT NULL,
   nonce BLOB NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -218,8 +219,8 @@ Commands:
 - `/manage auth <private_key> [label]`
 - `/manage list`
 - `/manage positions [wallet]`
-- `/manage market_order <wallet> <market> <side> <amount>`
-- `/manage limit_order <wallet> <market> <side> <price> <size>`
+- `/manage market_order <wallet> <token_id> <side> <amount>`
+- `/manage limit_order <wallet> <token_id> <side> <price> <size>`
 - `/manage cancel <wallet> <order_id>`
 - `/manage remove <wallet>`
 
