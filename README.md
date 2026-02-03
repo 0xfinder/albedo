@@ -41,11 +41,10 @@ Personal Telegram bot because the Polymarket UI sucks.
    # Generate with: openssl rand -hex 32
    ENCRYPTION_KEY=your_64_char_hex_key
 
-   # Optional - for WebSocket user events (your own wallet)
-   POLYMARKET_API_KEY=your_api_key
-   POLYMARKET_API_SECRET=your_api_secret
-   POLYMARKET_API_PASSPHRASE=your_api_passphrase
-   POLYMARKET_ADDRESS=your_wallet_address
+   # Optional - for real-time WebSocket notifications on your own wallet
+   # Export from Polymarket: Profile -> Cash -> ... -> Export Private Key
+   # API credentials are derived automatically from this key
+   POLYMARKET_PRIVATE_KEY=your_private_key
    ```
 
 4. Build and run:
@@ -66,3 +65,10 @@ Start a conversation with your bot on Telegram and use `/start` to see the menu.
 - Authenticate with your private key (encrypted and stored locally)
 - View positions and place market/limit orders
 - Cancel orders directly from Telegram
+
+## Testing
+
+Run the test suite:
+```bash
+cargo test
+```

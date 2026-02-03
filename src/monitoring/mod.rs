@@ -1,5 +1,5 @@
 use futures::{Stream, StreamExt};
-use polymarket_client_sdk::auth::{Credentials, LocalSigner, Signer, Uuid};
+use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::ws::Client as WsClient;
 use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 use teloxide::prelude::Requester;
 use tokio::sync::Mutex;
 
-use crate::config::WsCredentialsConfig;
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
 
@@ -68,16 +67,16 @@ pub fn spawn_ws_user_events(
     bot: teloxide::prelude::Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
-    ws_credentials: Option<WsCredentialsConfig>,
+    polymarket_private_key: Option<String>,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    if encryption_key.is_none() && ws_credentials.is_none() {
+    if encryption_key.is_none() && polymarket_private_key.is_none() {
         return None;
     }
 
     Some(tokio::spawn(async move {
-        if let Some(credentials) = ws_credentials {
+        if let Some(private_key) = polymarket_private_key {
             tokio::spawn(async move {
-                let _ = connect_env_user_events(credentials).await;
+                let _ = connect_env_user_events(private_key).await;
             });
         }
 
@@ -179,22 +178,18 @@ where
     }
 }
 
-async fn connect_env_user_events(
-    credentials: WsCredentialsConfig,
-) -> color_eyre::eyre::Result<()> {
-    run_ws_with_backoff(|| connect_env_user_events_once(credentials.clone())).await
+async fn connect_env_user_events(private_key: String) -> color_eyre::eyre::Result<()> {
+    run_ws_with_backoff(|| connect_env_user_events_once(private_key.clone())).await
 }
 
 async fn connect_env_user_events_once(
-    credentials: WsCredentialsConfig,
+    private_key: String,
 ) -> color_eyre::eyre::Result<StreamOutcome> {
-    let api_key = Uuid::parse_str(&credentials.api_key)?;
-    let address = Address::from_str(&credentials.address)?;
-    let credentials = Credentials::new(
-        api_key,
-        credentials.api_secret,
-        credentials.api_passphrase,
-    );
+    let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
+    let address = signer.address();
+    let credentials = ClobClient::default()
+        .create_or_derive_api_key(&signer, None)
+        .await?;
 
     let client = WsClient::default().authenticate(credentials, address)?;
     let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
@@ -242,7 +237,7 @@ async fn connect_user_events_once(
 
 #[cfg(test)]
 mod tests {
-    use super::{consume_user_event_stream, StreamExit};
+    use super::*;
     use futures::stream;
 
     #[tokio::test]
@@ -255,14 +250,98 @@ mod tests {
 
     #[tokio::test]
     async fn consume_events_reads_to_end() {
-        let events = stream::iter(vec![
-            Ok::<u8, &'static str>(1u8),
-            Ok(2u8),
-            Ok(3u8),
-        ]);
+        let events = stream::iter(vec![Ok::<u8, &'static str>(1u8), Ok(2u8), Ok(3u8)]);
         let outcome = consume_user_event_stream(events).await;
         assert_eq!(outcome.ok_count, 3);
         assert_eq!(outcome.exit, StreamExit::End);
+    }
+
+    #[test]
+    fn format_decimal_normalizes() {
+        let d = Decimal::from_str("1.50000").unwrap();
+        assert_eq!(format_decimal(d), "1.5");
+    }
+
+    #[test]
+    fn format_decimal_preserves_integer() {
+        let d = Decimal::from_str("100").unwrap();
+        assert_eq!(format_decimal(d), "100");
+    }
+
+    #[test]
+    fn format_optional_decimal_some() {
+        let d = Some(Decimal::from_str("2.5").unwrap());
+        assert_eq!(format_optional_decimal(d), "2.5");
+    }
+
+    #[test]
+    fn format_optional_decimal_none() {
+        assert_eq!(format_optional_decimal(None), "N/A");
+    }
+
+    #[test]
+    fn format_market_label_with_slug() {
+        let info = MarketInfo {
+            title: "Will Bitcoin hit 100k?".to_string(),
+            slug: Some("btc-100k".to_string()),
+        };
+        assert_eq!(
+            format_market_label(&info),
+            "Will Bitcoin hit 100k? (btc-100k)"
+        );
+    }
+
+    #[test]
+    fn format_market_label_without_slug() {
+        let info = MarketInfo {
+            title: "Some Market".to_string(),
+            slug: None,
+        };
+        assert_eq!(format_market_label(&info), "Some Market");
+    }
+
+    #[test]
+    fn format_activity_message_complete() {
+        let notification = ActivityNotification {
+            activity_type: "Trade".to_string(),
+            market: "Bitcoin 100k".to_string(),
+            market_slug: Some("btc-100k".to_string()),
+            outcome: Some("Yes".to_string()),
+            side: Some("Buy".to_string()),
+            size: "10".to_string(),
+            usdc_size: "5.50".to_string(),
+            price: Some("0.55".to_string()),
+            timestamp: 1700000000,
+            tx_hash: "0xabc123".to_string(),
+        };
+        let msg = format_activity_message("my_wallet", &notification);
+        assert!(msg.contains("my_wallet"));
+        assert!(msg.contains("Trade"));
+        assert!(msg.contains("Bitcoin 100k"));
+        assert!(msg.contains("Yes"));
+        assert!(msg.contains("Buy"));
+        assert!(msg.contains("10"));
+        assert!(msg.contains("5.50"));
+        assert!(msg.contains("0.55"));
+        assert!(msg.contains("0xabc123"));
+    }
+
+    #[test]
+    fn format_activity_message_missing_optional_fields() {
+        let notification = ActivityNotification {
+            activity_type: "Transfer".to_string(),
+            market: "Some Market".to_string(),
+            market_slug: None,
+            outcome: None,
+            side: None,
+            size: "100".to_string(),
+            usdc_size: "100".to_string(),
+            price: None,
+            timestamp: 1700000000,
+            tx_hash: "0xdef456".to_string(),
+        };
+        let msg = format_activity_message("wallet", &notification);
+        assert!(msg.contains("N/A"));
     }
 }
 

@@ -8,16 +8,8 @@ pub struct Config {
     pub telegram_token: String,
     pub database_url: String,
     pub data_poll_seconds: u64,
-    pub ws_credentials: Option<WsCredentialsConfig>,
+    pub polymarket_private_key: Option<String>,
     pub encryption_key: Option<EncryptionKey>,
-}
-
-#[derive(Clone, Debug)]
-pub struct WsCredentialsConfig {
-    pub api_key: String,
-    pub api_secret: String,
-    pub api_passphrase: String,
-    pub address: String,
 }
 
 impl Config {
@@ -32,14 +24,14 @@ impl Config {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(1);
-        let ws_credentials = read_ws_credentials();
+        let polymarket_private_key = env::var("POLYMARKET_PRIVATE_KEY").ok();
         let encryption_key = read_encryption_key()?;
 
         Ok(Self {
             telegram_token: env::var("TELEGRAM_TOKEN").context("TELEGRAM_TOKEN not set")?,
             database_url,
             data_poll_seconds,
-            ws_credentials,
+            polymarket_private_key,
             encryption_key,
         })
     }
@@ -61,20 +53,6 @@ fn normalize_database_url(raw: String) -> String {
     format!("sqlite://{}", raw)
 }
 
-fn read_ws_credentials() -> Option<WsCredentialsConfig> {
-    let api_key = env::var("POLYMARKET_API_KEY").ok()?;
-    let api_secret = env::var("POLYMARKET_API_SECRET").ok()?;
-    let api_passphrase = env::var("POLYMARKET_API_PASSPHRASE").ok()?;
-    let address = env::var("POLYMARKET_ADDRESS").ok()?;
-
-    Some(WsCredentialsConfig {
-        api_key,
-        api_secret,
-        api_passphrase,
-        address,
-    })
-}
-
 fn read_encryption_key() -> Result<Option<EncryptionKey>> {
     let value = match env::var("ENCRYPTION_KEY") {
         Ok(value) => value,
@@ -82,4 +60,39 @@ fn read_encryption_key() -> Result<Option<EncryptionKey>> {
     };
 
     Ok(Some(EncryptionKey::from_hex(&value)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_database_url_sqlite_double_slash() {
+        let result = normalize_database_url("sqlite://bot.db".to_string());
+        assert_eq!(result, "sqlite://bot.db");
+    }
+
+    #[test]
+    fn normalize_database_url_sqlite_double_colon() {
+        let result = normalize_database_url("sqlite::memory:".to_string());
+        assert_eq!(result, "sqlite::memory:");
+    }
+
+    #[test]
+    fn normalize_database_url_sqlite_single_colon() {
+        let result = normalize_database_url("sqlite:bot.db".to_string());
+        assert_eq!(result, "sqlite://bot.db");
+    }
+
+    #[test]
+    fn normalize_database_url_other_scheme() {
+        let result = normalize_database_url("postgres://localhost/db".to_string());
+        assert_eq!(result, "postgres://localhost/db");
+    }
+
+    #[test]
+    fn normalize_database_url_bare_path() {
+        let result = normalize_database_url("bot.db".to_string());
+        assert_eq!(result, "sqlite://bot.db");
+    }
 }
