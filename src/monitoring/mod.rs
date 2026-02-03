@@ -1,4 +1,4 @@
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use polymarket_client_sdk::auth::{Credentials, LocalSigner, Signer, Uuid};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::ws::Client as WsClient;
@@ -85,6 +85,20 @@ pub fn spawn_ws_user_events(
     }))
 }
 
+async fn consume_user_event_stream<S, T, E>(mut stream: S) -> usize
+where
+    S: Stream<Item = Result<T, E>> + Unpin,
+{
+    let mut ok_count = 0;
+    while let Some(event) = stream.next().await {
+        if event.is_err() {
+            break;
+        }
+        ok_count += 1;
+    }
+    ok_count
+}
+
 async fn connect_env_user_events(
     credentials: WsCredentialsConfig,
 ) -> color_eyre::eyre::Result<()> {
@@ -97,13 +111,8 @@ async fn connect_env_user_events(
     );
 
     let client = WsClient::default().authenticate(credentials, address)?;
-    let stream = client.subscribe_user_events(Vec::new())?;
-    let mut stream = Box::pin(stream);
-    while let Some(event) = stream.next().await {
-        if event.is_err() {
-            break;
-        }
-    }
+    let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
+    let _ = consume_user_event_stream(stream).await;
 
     Ok(())
 }
@@ -122,16 +131,34 @@ async fn connect_user_events(
         .await?;
 
     let client = WsClient::default().authenticate(credentials, address)?;
-    let stream = client.subscribe_user_events(Vec::new())?;
-
-    let mut stream = Box::pin(stream);
-    while let Some(event) = stream.next().await {
-        if event.is_err() {
-            break;
-        }
-    }
+    let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
+    let _ = consume_user_event_stream(stream).await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::consume_user_event_stream;
+    use futures::stream;
+
+    #[tokio::test]
+    async fn consume_events_stops_on_error() {
+        let events = stream::iter(vec![Ok("one"), Ok("two"), Err("boom"), Ok("three")]);
+        let count = consume_user_event_stream(events).await;
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn consume_events_reads_to_end() {
+        let events = stream::iter(vec![
+            Ok::<u8, &'static str>(1u8),
+            Ok(2u8),
+            Ok(3u8),
+        ]);
+        let count = consume_user_event_stream(events).await;
+        assert_eq!(count, 3);
+    }
 }
 
 async fn poll_activity(
