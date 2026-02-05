@@ -7,8 +7,9 @@ use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
+use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
@@ -1218,18 +1219,24 @@ async fn send_tracked_wallets(
 
     let mut lines = Vec::with_capacity(wallets.len());
     for wallet in wallets {
-        match wallet.label {
-            Some(label) => lines.push(format!("- {} ({})", wallet.wallet_address, label)),
-            None => lines.push(format!("- {}", wallet.wallet_address)),
-        }
+        let label_text = wallet.label.as_deref().unwrap_or("Unlabeled");
+        let profile_url = format!("https://polymarket.com/profile/{}", wallet.wallet_address);
+        lines.push(format!(
+            "*{}* / [profile]({})\nWallet: `{}`",
+            escape_markdown(label_text),
+            profile_url,
+            wallet.wallet_address
+        ));
     }
 
     let message = format!(
-        "Tracking {} wallet(s). Here's your list:\n{}",
+        "👛 Tracking {} wallet(s)\n\n{}",
         lines.len(),
-        lines.join("\n")
+        lines.join("\n\n")
     );
-    bot.send_message(chat_id, message).await?;
+    bot.send_message(chat_id, message)
+        .parse_mode(ParseMode::MarkdownV2)
+        .await?;
     Ok(())
 }
 
@@ -1631,6 +1638,28 @@ fn parse_decimal(raw: &str) -> Option<Decimal> {
 
 fn format_decimal(value: Decimal) -> String {
     value.normalize().to_string()
+}
+
+fn escape_markdown(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('_', "\\_")
+        .replace('*', "\\*")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('(', "\\(")
+        .replace(')', "\\)")
+        .replace('~', "\\~")
+        .replace('`', "\\`")
+        .replace('>', "\\>")
+        .replace('#', "\\#")
+        .replace('+', "\\+")
+        .replace('-', "\\-")
+        .replace('=', "\\=")
+        .replace('|', "\\|")
+        .replace('{', "\\{")
+        .replace('}', "\\}")
+        .replace('.', "\\.")
+        .replace('!', "\\!")
 }
 
 #[cfg(test)]
