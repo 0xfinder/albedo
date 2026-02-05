@@ -146,7 +146,8 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send the private key for this wallet.",
+                "Send the private key for this wallet.\n\n\
+                ⚠️ Security: Your message will be deleted immediately, but consider using a dedicated wallet with limited funds.",
                 manage_cancel_menu_markup(),
             )
             .await?;
