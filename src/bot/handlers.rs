@@ -452,6 +452,8 @@ async fn handle_pending_action(
             send_track_menu(&bot, msg.chat.id).await?;
         }
         ACTION_MANAGE_AUTH_KEY => {
+            let _ = bot.delete_message(msg.chat.id, msg.id).await;
+
             let Some(encryption_key) = encryption_key else {
                 let _ = db::clear_pending_state(db, user_id).await;
                 bot.send_message(msg.chat.id, "Set ENCRYPTION_KEY to store managed wallets.")
@@ -471,7 +473,7 @@ async fn handle_pending_action(
             let signer = match LocalSigner::from_str(private_key) {
                 Ok(signer) => signer.with_chain_id(Some(POLYGON)),
                 Err(_) => {
-                    bot.send_message(msg.chat.id, "That private key looks invalid.")
+                    bot.send_message(msg.chat.id, "Invalid private key format.")
                         .await?;
                     return Ok(());
                 }
