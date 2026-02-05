@@ -9,7 +9,8 @@ use polymarket_client_sdk::types::{Address, Decimal, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
 use teloxide::prelude::*;
 use teloxide::types::{
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardRemove,
+    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
+    ReplyKeyboardMarkup,
 };
 use teloxide::utils::command::parse_command;
 
@@ -18,7 +19,9 @@ use crate::utils::crypto::{self, EncryptionKey};
 
 const HELP_TEXT: &str = "Available commands:\n\
 /start - Start the bot\n\
-/help - Show this help message";
+/help - Show this help message\n\
+/track - Open the track menu\n\
+/manage - Open the manage menu";
 
 const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
 const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
@@ -417,7 +420,7 @@ async fn handle_top_level_command(
 
 async fn handle_start(bot: Bot, msg: Message) -> ResponseResult<()> {
     bot.send_message(msg.chat.id, "Menu updated.")
-        .reply_markup(KeyboardRemove::new())
+        .reply_markup(main_menu_reply_markup())
         .await?;
 
     bot.send_message(msg.chat.id, "Choose a mode:")
@@ -1008,6 +1011,13 @@ fn main_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback("Track", "menu:track"),
         InlineKeyboardButton::callback("Manage", "menu:manage"),
+    ]])
+}
+
+fn main_menu_reply_markup() -> ReplyKeyboardMarkup {
+    ReplyKeyboardMarkup::new(vec![vec![
+        KeyboardButton::new("Track"),
+        KeyboardButton::new("Manage"),
     ]])
 }
 
