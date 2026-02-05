@@ -1222,20 +1222,20 @@ async fn send_tracked_wallets(
         let label_text = wallet.label.as_deref().unwrap_or("Unlabeled");
         let profile_url = format!("https://polymarket.com/profile/{}", wallet.wallet_address);
         lines.push(format!(
-            "*{}* / [profile]({})\nWallet: `{}`",
-            escape_markdown(label_text),
-            escape_markdown_url(&profile_url),
+            "<b>{}</b> / <a href=\"{}\">profile</a>\nWallet: <code>{}</code>",
+            html_escape(label_text),
+            profile_url,
             wallet.wallet_address
         ));
     }
 
     let message = format!(
-        "👛 Tracking {} wallet\\(s\\)\n\n{}",
+        "👛 Tracking {} wallet(s)\n\n{}",
         lines.len(),
         lines.join("\n\n")
     );
     bot.send_message(chat_id, message)
-        .parse_mode(ParseMode::MarkdownV2)
+        .parse_mode(ParseMode::Html)
         .await?;
     Ok(())
 }
@@ -1640,30 +1640,10 @@ fn format_decimal(value: Decimal) -> String {
     value.normalize().to_string()
 }
 
-fn escape_markdown(text: &str) -> String {
-    text.replace('\\', "\\\\")
-        .replace('_', "\\_")
-        .replace('*', "\\*")
-        .replace('[', "\\[")
-        .replace(']', "\\]")
-        .replace('(', "\\(")
-        .replace(')', "\\)")
-        .replace('~', "\\~")
-        .replace('`', "\\`")
-        .replace('>', "\\>")
-        .replace('#', "\\#")
-        .replace('+', "\\+")
-        .replace('-', "\\-")
-        .replace('=', "\\=")
-        .replace('|', "\\|")
-        .replace('{', "\\{")
-        .replace('}', "\\}")
-        .replace('.', "\\.")
-        .replace('!', "\\!")
-}
-
-fn escape_markdown_url(url: &str) -> String {
-    url.replace('\\', "\\\\").replace(')', "\\)")
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]
