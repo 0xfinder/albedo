@@ -1230,7 +1230,7 @@ async fn send_tracked_wallets(
     }
 
     let message = format!(
-        "👛 Tracking {} wallet(s)\n\n{}",
+        "👛 Tracking {} wallet\\(s\\)\n\n{}",
         lines.len(),
         lines.join("\n\n")
     );
