@@ -1224,7 +1224,7 @@ async fn send_tracked_wallets(
         lines.push(format!(
             "*{}* / [profile]({})\nWallet: `{}`",
             escape_markdown(label_text),
-            escape_markdown(&profile_url),
+            profile_url,
             wallet.wallet_address
         ));
     }
