@@ -211,7 +211,8 @@ async fn connect_user_events_once(
     bot: &teloxide::prelude::Bot,
     encryption_key: EncryptionKey,
 ) -> color_eyre::eyre::Result<StreamOutcome> {
-    let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key)?;
+    let aad = crypto::build_aad(wallet.user_id, &wallet.wallet_address);
+    let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)?;
     let private_key = String::from_utf8(decrypted)?;
     let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
 

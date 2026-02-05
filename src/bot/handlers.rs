@@ -481,7 +481,8 @@ async fn handle_pending_action(
             };
 
             let wallet_address = normalize_wallet_address(&signer.address().to_string());
-            let (encrypted_key, nonce) = match crypto::encrypt(encryption_key, private_key.as_bytes()) {
+            let aad = crypto::build_aad(user_id, &wallet_address);
+            let (encrypted_key, nonce) = match crypto::encrypt(encryption_key, private_key.as_bytes(), &aad) {
                 Ok(payload) => payload,
                 Err(_err) => {
                     bot.send_message(msg.chat.id, "Sorry, I couldn't secure that key. Try again soon.")
@@ -1271,7 +1272,8 @@ async fn load_managed_wallet_signer(
         Err(_) => return Err("Sorry, I couldn't load that wallet.".to_string()),
     };
 
-    let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key)
+    let aad = crypto::build_aad(user_id, &wallet.wallet_address);
+    let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)
         .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?;
     let private_key = String::from_utf8(decrypted)
         .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?;
