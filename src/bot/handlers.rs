@@ -307,16 +307,6 @@ pub async fn handle_callback(
             send_tracked_wallets(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
-        "track:status" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
-            send_track_status(&bot, chat_id, &db, user_id).await?;
-            bot.answer_callback_query(query.id).await?;
-        }
         "track:skip_label" => {
             let chat_id = query
                 .message
@@ -1218,25 +1208,6 @@ async fn send_tracked_wallets(
         lines.join("\n")
     );
     bot.send_message(chat_id, message).await?;
-    Ok(())
-}
-
-async fn send_track_status(
-    bot: &Bot,
-    chat_id: ChatId,
-    db: &Db,
-    user_id: i64,
-) -> ResponseResult<()> {
-    let count = match db::count_tracked_wallets(db, user_id).await {
-        Ok(count) => count,
-        Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load tracking status.").await?;
-            return Ok(());
-        }
-    };
-
-    bot.send_message(chat_id, format!("Tracking {count} wallet(s)."))
-        .await?;
     Ok(())
 }
 
