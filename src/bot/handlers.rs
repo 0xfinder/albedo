@@ -1224,7 +1224,7 @@ async fn send_tracked_wallets(
         lines.push(format!(
             "*{}* / [profile]({})\nWallet: `{}`",
             escape_markdown(label_text),
-            profile_url,
+            escape_markdown_url(&profile_url),
             wallet.wallet_address
         ));
     }
@@ -1660,6 +1660,10 @@ fn escape_markdown(text: &str) -> String {
         .replace('}', "\\}")
         .replace('.', "\\.")
         .replace('!', "\\!")
+}
+
+fn escape_markdown_url(url: &str) -> String {
+    url.replace('\\', "\\\\").replace(')', "\\)")
 }
 
 #[cfg(test)]
