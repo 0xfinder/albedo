@@ -315,10 +315,12 @@ mod tests {
             price: Some("0.55".to_string()),
             timestamp: 1700000000,
             tx_hash: "0xabc123".to_string(),
+            username: Some("polyuser".to_string()),
         };
         let msg = format_activity_message("0x123abc", Some("my_wallet"), &notification);
         assert!(msg.contains("0x123abc"));
         assert!(msg.contains("my_wallet"));
+        assert!(msg.contains("@polyuser"));
         assert!(msg.contains("🟢 BUY"));
         assert!(msg.contains("Bitcoin 100k"));
         assert!(msg.contains("btc-100k"));
@@ -341,6 +343,7 @@ mod tests {
             price: None,
             timestamp: 1700000000,
             tx_hash: "0xdef456".to_string(),
+            username: None,
         };
         let msg = format_activity_message("0xwallet", None, &notification);
         assert!(msg.contains("N/A"));
@@ -438,6 +441,13 @@ async fn poll_activity(
         let _ = bot
             .send_message(teloxide::types::ChatId(wallet.chat_id), message)
             .parse_mode(teloxide::types::ParseMode::Html)
+            .link_preview_options(teloxide::types::LinkPreviewOptions {
+                is_disabled: true,
+                url: None,
+                prefer_small_media: false,
+                prefer_large_media: false,
+                show_above_text: false,
+            })
             .await;
     }
 
@@ -530,6 +540,7 @@ struct ActivityNotification {
     price: Option<String>,
     timestamp: i64,
     tx_hash: String,
+    username: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -545,6 +556,10 @@ impl ActivityNotification {
             .clone()
             .or_else(|| activity.slug.clone())
             .unwrap_or_else(|| "Unknown market".to_string());
+        let username = activity
+            .pseudonym
+            .clone()
+            .or_else(|| activity.name.clone());
         Self {
             activity_type: format!("{:?}", activity.activity_type),
             market,
@@ -556,6 +571,7 @@ impl ActivityNotification {
             price: activity.price.map(format_decimal),
             timestamp: activity.timestamp,
             tx_hash: activity.transaction_hash.to_string(),
+            username,
         }
     }
 }
@@ -568,15 +584,26 @@ fn format_activity_message(
     let (emoji, action) = match notification.activity_type.as_str() {
         "Buy" => ("🟢", "BUY"),
         "Sell" => ("🔴", "SELL"),
+        "Trade" => match notification.side.as_deref() {
+            Some("Buy") => ("🟢", "BUY"),
+            Some("Sell") => ("🔴", "SELL"),
+            _ => ("📊", "TRADE"),
+        },
         "Redeem" | "Claim" => ("🟠", "CLOSED"),
-        _ => ("📊", &notification.activity_type as &str),
+        _ => ("📊", notification.activity_type.as_str()),
     };
 
-    let name_line = match label {
-        Some(name) => format!(
-            "\nName: <a href=\"https://polymarket.com/profile/{wallet_address}\">{name}</a>"
+    let name_line = match (label, &notification.username) {
+        (Some(name), Some(username)) => format!(
+            "\nName: {name} (<a href=\"https://polymarket.com/profile/{wallet_address}\">@{username}</a>)"
         ),
-        None => String::new(),
+        (Some(name), None) => format!(
+            "\nName: {name} (<a href=\"https://polymarket.com/profile/{wallet_address}\">@{wallet_address}</a>)"
+        ),
+        (None, Some(username)) => format!(
+            "\nName: <a href=\"https://polymarket.com/profile/{wallet_address}\">@{username}</a>"
+        ),
+        (None, None) => String::new(),
     };
 
     let market_line = match &notification.market_slug {
