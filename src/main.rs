@@ -31,12 +31,12 @@ async fn main() -> Result<()> {
     let _ws_handle = monitoring::spawn_ws_user_events(
         bot.clone(),
         db.clone(),
-        config.encryption_key,
+        config.encryption_key.clone(),
         config.polymarket_private_key.clone(),
     );
 
     // Start bot dispatcher
-    bot::start(bot, db, config.encryption_key).await?;
+    bot::start(bot, db, config.encryption_key.clone()).await?;
     
     Ok(())
 }

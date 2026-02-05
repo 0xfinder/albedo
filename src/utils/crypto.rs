@@ -1,8 +1,9 @@
 use aes_gcm::aead::{rand_core::RngCore, Aead, KeyInit, OsRng, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use color_eyre::eyre::{eyre, Result};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct EncryptionKey([u8; 32]);
 
 impl EncryptionKey {
@@ -34,7 +35,7 @@ pub fn build_aad(user_id: i64, wallet_address: &str) -> Vec<u8> {
     format!("{}:{}", user_id, wallet_address.to_lowercase()).into_bytes()
 }
 
-pub fn encrypt(key: EncryptionKey, plaintext: &[u8], aad: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn encrypt(key: &EncryptionKey, plaintext: &[u8], aad: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).expect("key length is 32 bytes");
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -46,7 +47,7 @@ pub fn encrypt(key: EncryptionKey, plaintext: &[u8], aad: &[u8]) -> Result<(Vec<
     Ok((ciphertext, nonce_bytes.to_vec()))
 }
 
-pub fn decrypt(key: EncryptionKey, nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt(key: &EncryptionKey, nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     if nonce.len() != 12 {
         return Err(eyre!("invalid encryption nonce"));
     }
@@ -103,8 +104,8 @@ mod tests {
         let plaintext = b"hello world";
         let aad = b"1:0xabc123";
 
-        let (ciphertext, nonce) = encrypt(key, plaintext, aad).unwrap();
-        let decrypted = decrypt(key, &nonce, &ciphertext, aad).unwrap();
+        let (ciphertext, nonce) = encrypt(&key, plaintext, aad).unwrap();
+        let decrypted = decrypt(&key, &nonce, &ciphertext, aad).unwrap();
 
         assert_eq!(decrypted, plaintext);
     }
@@ -115,8 +116,8 @@ mod tests {
         let plaintext = b"hello world";
         let aad = b"1:0xabc123";
 
-        let (ciphertext1, _) = encrypt(key, plaintext, aad).unwrap();
-        let (ciphertext2, _) = encrypt(key, plaintext, aad).unwrap();
+        let (ciphertext1, _) = encrypt(&key, plaintext, aad).unwrap();
+        let (ciphertext2, _) = encrypt(&key, plaintext, aad).unwrap();
 
         assert_ne!(ciphertext1, ciphertext2);
     }
@@ -131,8 +132,8 @@ mod tests {
         let plaintext = b"secret data";
         let aad = b"1:0xabc123";
 
-        let (ciphertext, nonce) = encrypt(key1, plaintext, aad).unwrap();
-        let result = decrypt(key2, &nonce, &ciphertext, aad);
+        let (ciphertext, nonce) = encrypt(&key1, plaintext, aad).unwrap();
+        let result = decrypt(&key2, &nonce, &ciphertext, aad);
 
         assert!(result.is_err());
     }
@@ -143,9 +144,9 @@ mod tests {
         let plaintext = b"secret data";
         let aad = b"1:0xabc123";
 
-        let (ciphertext, _) = encrypt(key, plaintext, aad).unwrap();
+        let (ciphertext, _) = encrypt(&key, plaintext, aad).unwrap();
         let wrong_nonce = [0u8; 12];
-        let result = decrypt(key, &wrong_nonce, &ciphertext, aad);
+        let result = decrypt(&key, &wrong_nonce, &ciphertext, aad);
 
         assert!(result.is_err());
     }
@@ -157,8 +158,8 @@ mod tests {
         let aad = b"1:0xabc123";
         let wrong_aad = b"2:0xdef456";
 
-        let (ciphertext, nonce) = encrypt(key, plaintext, aad).unwrap();
-        let result = decrypt(key, &nonce, &ciphertext, wrong_aad);
+        let (ciphertext, nonce) = encrypt(&key, plaintext, aad).unwrap();
+        let result = decrypt(&key, &nonce, &ciphertext, wrong_aad);
 
         assert!(result.is_err());
     }
@@ -167,9 +168,9 @@ mod tests {
     fn decrypt_with_invalid_nonce_length_fails() {
         let key = EncryptionKey::from_hex(TEST_KEY_HEX).unwrap();
         let aad = b"1:0xabc123";
-        let (ciphertext, _) = encrypt(key, b"data", aad).unwrap();
+        let (ciphertext, _) = encrypt(&key, b"data", aad).unwrap();
 
-        let result = decrypt(key, &[0u8; 8], &ciphertext, aad);
+        let result = decrypt(&key, &[0u8; 8], &ciphertext, aad);
         assert!(result.is_err());
     }
 
@@ -177,8 +178,8 @@ mod tests {
     fn encrypt_empty_plaintext() {
         let key = EncryptionKey::from_hex(TEST_KEY_HEX).unwrap();
         let aad = b"1:0xabc123";
-        let (ciphertext, nonce) = encrypt(key, b"", aad).unwrap();
-        let decrypted = decrypt(key, &nonce, &ciphertext, aad).unwrap();
+        let (ciphertext, nonce) = encrypt(&key, b"", aad).unwrap();
+        let decrypted = decrypt(&key, &nonce, &ciphertext, aad).unwrap();
         assert!(decrypted.is_empty());
     }
 
@@ -188,8 +189,8 @@ mod tests {
         let plaintext = vec![0xabu8; 10_000];
         let aad = b"1:0xabc123";
 
-        let (ciphertext, nonce) = encrypt(key, &plaintext, aad).unwrap();
-        let decrypted = decrypt(key, &nonce, &ciphertext, aad).unwrap();
+        let (ciphertext, nonce) = encrypt(&key, &plaintext, aad).unwrap();
+        let decrypted = decrypt(&key, &nonce, &ciphertext, aad).unwrap();
 
         assert_eq!(decrypted, plaintext);
     }

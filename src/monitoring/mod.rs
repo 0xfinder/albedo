@@ -87,7 +87,7 @@ pub fn spawn_ws_user_events(
             };
 
             for wallet in wallets {
-                let encryption_key = encryption_key;
+                let encryption_key = encryption_key.clone();
                 let db = db.clone();
                 let bot = bot.clone();
                 tokio::spawn(async move {
@@ -202,7 +202,7 @@ async fn connect_user_events(
     bot: teloxide::prelude::Bot,
     encryption_key: EncryptionKey,
 ) -> color_eyre::eyre::Result<()> {
-    run_ws_with_backoff(|| connect_user_events_once(&wallet, &db, &bot, encryption_key)).await
+    run_ws_with_backoff(|| connect_user_events_once(&wallet, &db, &bot, encryption_key.clone())).await
 }
 
 async fn connect_user_events_once(
@@ -212,7 +212,7 @@ async fn connect_user_events_once(
     encryption_key: EncryptionKey,
 ) -> color_eyre::eyre::Result<StreamOutcome> {
     let aad = crypto::build_aad(wallet.user_id, &wallet.wallet_address);
-    let decrypted = crypto::decrypt(encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)?;
+    let decrypted = crypto::decrypt(&encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)?;
     let private_key = String::from_utf8(decrypted)?;
     let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
 
