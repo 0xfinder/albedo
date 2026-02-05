@@ -8,10 +8,7 @@ use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
 use teloxide::prelude::*;
-use teloxide::types::{
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
-    ReplyKeyboardMarkup,
-};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
 use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
@@ -419,10 +416,6 @@ async fn handle_top_level_command(
 }
 
 async fn handle_start(bot: Bot, msg: Message) -> ResponseResult<()> {
-    bot.send_message(msg.chat.id, "Menu updated.")
-        .reply_markup(main_menu_reply_markup())
-        .await?;
-
     bot.send_message(msg.chat.id, "Choose a mode:")
         .reply_markup(main_menu_markup())
         .await?;
@@ -1011,13 +1004,6 @@ fn main_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback("Track", "menu:track"),
         InlineKeyboardButton::callback("Manage", "menu:manage"),
-    ]])
-}
-
-fn main_menu_reply_markup() -> ReplyKeyboardMarkup {
-    ReplyKeyboardMarkup::new(vec![vec![
-        KeyboardButton::new("Track"),
-        KeyboardButton::new("Manage"),
     ]])
 }
 
