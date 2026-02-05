@@ -38,6 +38,12 @@ pub async fn handle_message(
     bot_name: String,
     encryption_key: Option<EncryptionKey>,
 ) -> ResponseResult<()> {
+    if !msg.chat.is_private() {
+        bot.send_message(msg.chat.id, "For security, this bot only works in private chats.")
+            .await?;
+        return Ok(());
+    }
+
     let text = match msg.text() {
         Some(text) => text.to_string(),
         None => return Ok(()),
@@ -95,6 +101,13 @@ pub async fn handle_callback(
     db: Db,
     _encryption_key: Option<EncryptionKey>,
 ) -> ResponseResult<()> {
+    if let Some(message) = query.message.as_ref() {
+        if !message.chat().is_private() {
+            bot.answer_callback_query(query.id).await?;
+            return Ok(());
+        }
+    }
+
     let Some(data) = query.data.clone() else {
         return Ok(());
     };
