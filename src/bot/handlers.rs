@@ -1,12 +1,12 @@
 use std::str::FromStr;
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
-use polymarket_client_sdk::clob::types::{Amount, Side};
+use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal, U256};
-use polymarket_client_sdk::POLYGON;
+use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
 use teloxide::prelude::*;
 use teloxide::types::{
     CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardRemove,
@@ -25,7 +25,6 @@ const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
 const ACTION_TRACK_REMOVE: &str = "track_remove";
 const ACTION_MANAGE_AUTH_KEY: &str = "manage_auth_key";
 const ACTION_MANAGE_AUTH_LABEL: &str = "manage_auth_label";
-const ACTION_MANAGE_REMOVE: &str = "manage_remove";
 const ACTION_MANAGE_POSITIONS: &str = "manage_positions";
 const ACTION_MANAGE_MARKET_ORDER: &str = "manage_market_order";
 const ACTION_MANAGE_LIMIT_ORDER: &str = "manage_limit_order";
@@ -142,7 +141,30 @@ pub async fn handle_callback(
             send_callback_menu(&bot, &query, "Manage menu:", manage_menu_markup()).await?;
         }
         "manage:auth" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), None).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
+            send_callback_menu(
+                &bot,
+                &query,
+                "Select the wallet type for this account.",
+                manage_wallet_type_setup_markup(),
+            )
+            .await?;
+        }
+        "manage:auth_type_eoa" => {
+            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:0"))
+                .await;
+            send_callback_menu(
+                &bot,
+                &query,
+                "Send the private key for this wallet.\n\n\
+                ⚠️ Security: Your message will be deleted immediately, but consider using a dedicated wallet with limited funds.",
+                manage_cancel_menu_markup(),
+            )
+            .await?;
+        }
+        "manage:auth_type_proxy" => {
+            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:1"))
+                .await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -159,18 +181,18 @@ pub async fn handle_callback(
                 .as_ref()
                 .map(|message| message.chat().id)
                 .unwrap_or(ChatId(query.from.id.0 as i64));
-            send_managed_wallets(&bot, chat_id, &db, user_id).await?;
+            send_managed_wallet(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:positions" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_POSITIONS), None).await;
-            send_callback_menu(
-                &bot,
-                &query,
-                "Send the managed wallet address to view positions.",
-                manage_cancel_menu_markup(),
-            )
-            .await?;
+            let _ = db::clear_pending_state(&db, user_id).await;
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            send_managed_positions(&bot, chat_id, &db, user_id).await?;
+            bot.answer_callback_query(query.id).await?;
         }
         "manage:market_order" => {
             let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_MARKET_ORDER), None)
@@ -178,7 +200,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send: <wallet> <token_id> <side> <amount> (buy uses USDC, sell uses shares).",
+                "Send: <token_id> <side> <amount> (buy uses USDC, sell uses shares).",
                 manage_cancel_menu_markup(),
             )
             .await?;
@@ -189,7 +211,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send: <wallet> <token_id> <side> <price> <size>.",
+                "Send: <token_id> <side> <price> <size>.",
                 manage_cancel_menu_markup(),
             )
             .await?;
@@ -200,20 +222,60 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send: <wallet> <order_id>.",
+                "Send: <order_id>.",
                 manage_cancel_menu_markup(),
             )
             .await?;
         }
         "manage:remove" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_REMOVE), None).await;
+            let _ = db::clear_pending_state(&db, user_id).await;
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            prompt_managed_wallet_removal(&bot, chat_id, &db, user_id).await?;
+            bot.answer_callback_query(query.id).await?;
+        }
+        "manage:remove_confirm" => {
+            let _ = db::clear_pending_state(&db, user_id).await;
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            confirm_managed_wallet_removal(&bot, chat_id, &db, user_id).await?;
+            bot.answer_callback_query(query.id).await?;
+        }
+        "manage:wallet_type" => {
+            let _ = db::clear_pending_state(&db, user_id).await;
             send_callback_menu(
                 &bot,
                 &query,
-                "Send the managed wallet address to remove.",
-                manage_cancel_menu_markup(),
+                "Select the wallet type for this account.",
+                manage_wallet_type_change_markup(),
             )
             .await?;
+        }
+        "manage:change_type_eoa" => {
+            let _ = db::clear_pending_state(&db, user_id).await;
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Eoa).await?;
+            bot.answer_callback_query(query.id).await?;
+        }
+        "manage:change_type_proxy" => {
+            let _ = db::clear_pending_state(&db, user_id).await;
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Proxy).await?;
+            bot.answer_callback_query(query.id).await?;
         }
         "track:add" => {
             let _ = db::set_pending_state(&db, user_id, Some(ACTION_TRACK_ADD_ADDRESS), None).await;
@@ -463,6 +525,8 @@ async fn handle_pending_action(
                 return Ok(());
             };
 
+            let signature_type = parse_signature_type(data);
+
             let private_key = input.trim();
             if private_key.is_empty() {
                 bot.send_message(msg.chat.id, "Send the private key for this wallet.")
@@ -491,13 +555,15 @@ async fn handle_pending_action(
                 }
             };
 
-            if let Err(_err) = db::upsert_managed_wallet(
+            let had_wallet = matches!(db::get_managed_wallet(db, user_id).await, Ok(Some(_)));
+            if let Err(_err) = db::set_managed_wallet(
                 db,
                 user_id,
                 &wallet_address,
                 &encrypted_key,
                 &nonce,
                 None,
+                signature_type as i64,
             )
             .await
             {
@@ -519,6 +585,9 @@ async fn handle_pending_action(
                 return Ok(());
             }
 
+            if had_wallet {
+                bot.send_message(msg.chat.id, format!("Wallet updated to {wallet_address}.")).await?;
+            }
             bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
                 .reply_markup(manage_label_menu_markup())
                 .await?;
@@ -542,114 +611,9 @@ async fn handle_pending_action(
             finalize_manage_label(&bot, msg.chat.id, db, user_id, wallet_address, Some(label))
                 .await?;
         }
-        ACTION_MANAGE_REMOVE => {
-            if !is_valid_wallet_address(input) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid. Expected 0x + 40 hex characters.")
-                    .await?;
-                return Ok(());
-            }
-
-            let wallet_address = normalize_wallet_address(input);
-            let removed = match db::remove_managed_wallet(db, user_id, &wallet_address).await {
-                Ok(removed) => removed,
-                Err(_err) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't remove that wallet. Try again soon.")
-                        .await?;
-                    return Ok(());
-                }
-            };
-
-            let _ = db::clear_pending_state(db, user_id).await;
-
-            if removed {
-                bot.send_message(msg.chat.id, format!("Removed managed wallet {wallet_address}."))
-                    .await?;
-            } else {
-                bot.send_message(msg.chat.id, "That wallet is not managed yet.")
-                    .await?;
-            }
-
-            send_manage_menu(&bot, msg.chat.id).await?;
-        }
         ACTION_MANAGE_POSITIONS => {
-            if !is_valid_wallet_address(input) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid. Expected 0x + 40 hex characters.")
-                    .await?;
-                return Ok(());
-            }
-
-            let wallet_address = normalize_wallet_address(input);
-            let managed_wallet = match db::get_managed_wallet(db, user_id, &wallet_address).await {
-                Ok(Some(wallet)) => wallet,
-                Ok(None) => {
-                    bot.send_message(msg.chat.id, "That wallet is not managed yet.")
-                        .await?;
-                    return Ok(());
-                }
-                Err(_err) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't load that wallet.")
-                        .await?;
-                    return Ok(());
-                }
-            };
-
-            let address = match Address::from_str(&managed_wallet.wallet_address) {
-                Ok(address) => address,
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "That wallet address is invalid.")
-                        .await?;
-                    return Ok(());
-                }
-            };
-
-            let client = DataClient::default();
-            let builder = match PositionsRequest::builder().user(address).limit(200) {
-                Ok(builder) => builder,
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't build that request.")
-                        .await?;
-                    return Ok(());
-                }
-            };
-            let request = builder.build();
-
-            let positions = match client.positions(&request).await {
-                Ok(positions) => positions,
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't fetch positions.")
-                        .await?;
-                    return Ok(());
-                }
-            };
-
-            let label = managed_wallet
-                .label
-                .as_deref()
-                .unwrap_or(managed_wallet.wallet_address.as_str());
-            if positions.is_empty() {
-                bot.send_message(msg.chat.id, format!("No open positions for {label}."))
-                    .await?;
-            } else {
-                let mut lines = Vec::new();
-                for position in positions.iter().take(8) {
-                    lines.push(format!(
-                        "- {} ({}) size {} avg {}",
-                        position.title,
-                        position.outcome,
-                        format_decimal(position.size),
-                        format_decimal(position.avg_price)
-                    ));
-                }
-                let message = format!(
-                    "Open positions for {label} ({count}):\n{lines}",
-                    count = positions.len(),
-                    lines = lines.join("\n")
-                );
-                bot.send_message(msg.chat.id, message).await?;
-            }
-
             let _ = db::clear_pending_state(db, user_id).await;
-            send_manage_menu(&bot, msg.chat.id).await?;
+            send_managed_positions(&bot, msg.chat.id, db, user_id).await?;
         }
         ACTION_MANAGE_MARKET_ORDER => {
             let Some(encryption_key) = encryption_key else {
@@ -659,23 +623,16 @@ async fn handle_pending_action(
             };
 
             let parts: Vec<&str> = input.split_whitespace().collect();
-            if parts.len() != 4 {
+            if parts.len() != 3 {
                 bot.send_message(
                     msg.chat.id,
-                    "Send: <wallet> <token_id> <side> <amount> (buy uses USDC, sell uses shares).",
+                    "Send: <token_id> <side> <amount> (buy uses USDC, sell uses shares).",
                 )
                 .await?;
                 return Ok(());
             }
 
-            let wallet_address = parts[0];
-            if !is_valid_wallet_address(wallet_address) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid.")
-                    .await?;
-                return Ok(());
-            }
-            let wallet_address = normalize_wallet_address(wallet_address);
-            let token_id = match parse_token_id(parts[1]) {
+            let token_id = match parse_token_id(parts[0]) {
                 Some(token_id) => token_id,
                 None => {
                     bot.send_message(msg.chat.id, "That token id looks invalid.")
@@ -683,7 +640,7 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
-            let side = match parse_side(parts[2]) {
+            let side = match parse_side(parts[1]) {
                 Some(side) => side,
                 None => {
                     bot.send_message(msg.chat.id, "Side must be buy or sell.")
@@ -691,7 +648,7 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
-            let amount_value = match parse_decimal(parts[3]) {
+            let amount_value = match parse_decimal(parts[2]) {
                 Some(value) => value,
                 None => {
                     bot.send_message(msg.chat.id, "Amount must be a decimal number.")
@@ -700,19 +657,31 @@ async fn handle_pending_action(
                 }
             };
 
-            let signer = match load_managed_wallet_signer(db, user_id, &wallet_address, encryption_key).await {
-                Ok(signer) => signer,
+            let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
+                Ok(payload) => payload,
                 Err(message) => {
                     bot.send_message(msg.chat.id, message).await?;
                     return Ok(());
                 }
             };
 
-            let client = match ClobClient::default().authentication_builder(&signer).authenticate().await {
+            let client = match ClobClient::default()
+                .authentication_builder(&signer)
+                .signature_type(signature_type)
+                .authenticate()
+                .await
+            {
                 Ok(client) => client,
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
-                        .await?;
+                Err(err) => {
+                    let message = format!("{err}");
+                    if is_wallet_type_error(&message) {
+                        send_wallet_type_error(&bot, msg.chat.id, "Order failed", &message).await?;
+                        let _ = db::clear_pending_state(db, user_id).await;
+                        send_manage_menu(&bot, msg.chat.id).await?;
+                    } else {
+                        bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
+                            .await?;
+                    }
                     return Ok(());
                 }
             };
@@ -772,8 +741,12 @@ async fn handle_pending_action(
                 )
                 .await?;
             } else if let Some(error) = response.error_msg {
-                bot.send_message(msg.chat.id, format!("Order rejected: {error}"))
-                    .await?;
+                if is_wallet_type_error(&error) {
+                    send_wallet_type_error(&bot, msg.chat.id, "Order rejected", &error).await?;
+                } else {
+                    bot.send_message(msg.chat.id, format!("Order rejected: {error}"))
+                        .await?;
+                }
             } else {
                 bot.send_message(msg.chat.id, "Order rejected.").await?;
             }
@@ -789,23 +762,16 @@ async fn handle_pending_action(
             };
 
             let parts: Vec<&str> = input.split_whitespace().collect();
-            if parts.len() != 5 {
+            if parts.len() != 4 {
                 bot.send_message(
                     msg.chat.id,
-                    "Send: <wallet> <token_id> <side> <price> <size>.",
+                    "Send: <token_id> <side> <price> <size>.",
                 )
                 .await?;
                 return Ok(());
             }
 
-            let wallet_address = parts[0];
-            if !is_valid_wallet_address(wallet_address) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid.")
-                    .await?;
-                return Ok(());
-            }
-            let wallet_address = normalize_wallet_address(wallet_address);
-            let token_id = match parse_token_id(parts[1]) {
+            let token_id = match parse_token_id(parts[0]) {
                 Some(token_id) => token_id,
                 None => {
                     bot.send_message(msg.chat.id, "That token id looks invalid.")
@@ -813,7 +779,7 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
-            let side = match parse_side(parts[2]) {
+            let side = match parse_side(parts[1]) {
                 Some(side) => side,
                 None => {
                     bot.send_message(msg.chat.id, "Side must be buy or sell.")
@@ -821,7 +787,7 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
-            let price = match parse_decimal(parts[3]) {
+            let price = match parse_decimal(parts[2]) {
                 Some(value) => value,
                 None => {
                     bot.send_message(msg.chat.id, "Price must be a decimal number.")
@@ -829,7 +795,7 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
-            let size = match parse_decimal(parts[4]) {
+            let size = match parse_decimal(parts[3]) {
                 Some(value) => value,
                 None => {
                     bot.send_message(msg.chat.id, "Size must be a decimal number.")
@@ -838,19 +804,31 @@ async fn handle_pending_action(
                 }
             };
 
-            let signer = match load_managed_wallet_signer(db, user_id, &wallet_address, encryption_key).await {
-                Ok(signer) => signer,
+            let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
+                Ok(payload) => payload,
                 Err(message) => {
                     bot.send_message(msg.chat.id, message).await?;
                     return Ok(());
                 }
             };
 
-            let client = match ClobClient::default().authentication_builder(&signer).authenticate().await {
+            let client = match ClobClient::default()
+                .authentication_builder(&signer)
+                .signature_type(signature_type)
+                .authenticate()
+                .await
+            {
                 Ok(client) => client,
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
-                        .await?;
+                Err(err) => {
+                    let message = format!("{err}");
+                    if is_wallet_type_error(&message) {
+                        send_wallet_type_error(&bot, msg.chat.id, "Order failed", &message).await?;
+                        let _ = db::clear_pending_state(db, user_id).await;
+                        send_manage_menu(&bot, msg.chat.id).await?;
+                    } else {
+                        bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
+                            .await?;
+                    }
                     return Ok(());
                 }
             };
@@ -897,8 +875,12 @@ async fn handle_pending_action(
                 )
                 .await?;
             } else if let Some(error) = response.error_msg {
-                bot.send_message(msg.chat.id, format!("Order rejected: {error}"))
-                    .await?;
+                if is_wallet_type_error(&error) {
+                    send_wallet_type_error(&bot, msg.chat.id, "Order rejected", &error).await?;
+                } else {
+                    bot.send_message(msg.chat.id, format!("Order rejected: {error}"))
+                        .await?;
+                }
             } else {
                 bot.send_message(msg.chat.id, "Order rejected.").await?;
             }
@@ -914,34 +896,39 @@ async fn handle_pending_action(
             };
 
             let parts: Vec<&str> = input.split_whitespace().collect();
-            if parts.len() != 2 {
-                bot.send_message(msg.chat.id, "Send: <wallet> <order_id>.")
+            if parts.len() != 1 {
+                bot.send_message(msg.chat.id, "Send: <order_id>.")
                     .await?;
                 return Ok(());
             }
 
-            let wallet_address = parts[0];
-            if !is_valid_wallet_address(wallet_address) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid.")
-                    .await?;
-                return Ok(());
-            }
-            let wallet_address = normalize_wallet_address(wallet_address);
-            let order_id = parts[1];
+            let order_id = parts[0];
 
-            let signer = match load_managed_wallet_signer(db, user_id, &wallet_address, encryption_key).await {
-                Ok(signer) => signer,
+            let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
+                Ok(payload) => payload,
                 Err(message) => {
                     bot.send_message(msg.chat.id, message).await?;
                     return Ok(());
                 }
             };
 
-            let client = match ClobClient::default().authentication_builder(&signer).authenticate().await {
+            let client = match ClobClient::default()
+                .authentication_builder(&signer)
+                .signature_type(signature_type)
+                .authenticate()
+                .await
+            {
                 Ok(client) => client,
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
-                        .await?;
+                Err(err) => {
+                    let message = format!("{err}");
+                    if is_wallet_type_error(&message) {
+                        send_wallet_type_error(&bot, msg.chat.id, "Cancel failed", &message).await?;
+                        let _ = db::clear_pending_state(db, user_id).await;
+                        send_manage_menu(&bot, msg.chat.id).await?;
+                    } else {
+                        bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
+                            .await?;
+                    }
                     return Ok(());
                 }
             };
@@ -959,8 +946,12 @@ async fn handle_pending_action(
                 bot.send_message(msg.chat.id, format!("Canceled order {order_id}."))
                     .await?;
             } else if let Some(reason) = response.not_canceled.get(order_id) {
-                bot.send_message(msg.chat.id, format!("Cancel failed: {reason}"))
-                    .await?;
+                if is_wallet_type_error(reason) {
+                    send_wallet_type_error(&bot, msg.chat.id, "Cancel failed", reason).await?;
+                } else {
+                    bot.send_message(msg.chat.id, format!("Cancel failed: {reason}"))
+                        .await?;
+                }
             } else {
                 bot.send_message(msg.chat.id, "Cancel failed.").await?;
             }
@@ -1044,9 +1035,13 @@ fn label_menu_markup() -> InlineKeyboardMarkup {
 fn manage_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
-            InlineKeyboardButton::callback("Auth wallet", "manage:auth"),
-            InlineKeyboardButton::callback("List wallets", "manage:list"),
+            InlineKeyboardButton::callback("Setup wallet", "manage:auth"),
+            InlineKeyboardButton::callback("My wallet", "manage:list"),
         ],
+        vec![InlineKeyboardButton::callback(
+            "Change wallet type",
+            "manage:wallet_type",
+        )],
         vec![
             InlineKeyboardButton::callback("Positions", "manage:positions"),
             InlineKeyboardButton::callback("Market order", "manage:market_order"),
@@ -1072,6 +1067,60 @@ fn manage_cancel_menu_markup() -> InlineKeyboardMarkup {
         "Cancel",
         "manage:cancel_action",
     )]])
+}
+
+fn manage_wallet_type_setup_markup() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "Email/Google login (Magic)",
+            "manage:auth_type_proxy",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Standard wallet (MetaMask/Ledger)",
+            "manage:auth_type_eoa",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Cancel",
+            "manage:cancel_action",
+        )],
+    ])
+}
+
+fn manage_wallet_type_change_markup() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "Email/Google login (Magic)",
+            "manage:change_type_proxy",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Standard wallet (MetaMask/Ledger)",
+            "manage:change_type_eoa",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Cancel",
+            "manage:cancel_action",
+        )],
+    ])
+}
+
+fn manage_wallet_type_prompt_markup() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "Change wallet type",
+        "manage:wallet_type",
+    )]])
+}
+
+fn manage_remove_confirm_markup() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "Confirm remove",
+            "manage:remove_confirm",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Cancel",
+            "manage:cancel_action",
+        )],
+    ])
 }
 
 fn cancel_menu_markup() -> InlineKeyboardMarkup {
@@ -1198,36 +1247,269 @@ async fn send_manage_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     Ok(())
 }
 
-async fn send_managed_wallets(
+async fn send_managed_positions(
     bot: &Bot,
     chat_id: ChatId,
     db: &Db,
     user_id: i64,
 ) -> ResponseResult<()> {
-    let wallets = match db::list_managed_wallets(db, user_id).await {
-        Ok(wallets) => wallets,
+    let managed_wallet = match db::get_managed_wallet(db, user_id).await {
+        Ok(wallet) => wallet,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallets.")
+            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    let Some(managed_wallet) = managed_wallet else {
+        bot.send_message(chat_id, "No wallet setup. Use Setup wallet first.")
+            .await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    let signer_address = match Address::from_str(&managed_wallet.wallet_address) {
+        Ok(address) => address,
+        Err(_) => {
+            bot.send_message(chat_id, "That wallet address is invalid.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    let signature_type = signature_type_from_db(managed_wallet.signature_type);
+    let address = match signature_type {
+        SignatureType::Proxy => match derive_proxy_wallet(signer_address, POLYGON) {
+            Some(proxy) => proxy,
+            None => {
+                bot.send_message(chat_id, "Proxy wallet derivation is not supported on this chain.")
+                    .await?;
+                send_manage_menu(bot, chat_id).await?;
+                return Ok(());
+            }
+        },
+        _ => signer_address,
+    };
+
+    let client = DataClient::default();
+    let builder = match PositionsRequest::builder().user(address).limit(200) {
+        Ok(builder) => builder,
+        Err(_) => {
+            bot.send_message(chat_id, "Sorry, I couldn't build that request.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+    let request = builder.build();
+
+    let positions = match client.positions(&request).await {
+        Ok(positions) => positions,
+        Err(_) => {
+            bot.send_message(chat_id, "Sorry, I couldn't fetch positions.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    let label = managed_wallet
+        .label
+        .as_deref()
+        .unwrap_or(managed_wallet.wallet_address.as_str());
+    if positions.is_empty() {
+        bot.send_message(chat_id, format!("No open positions for {label}."))
+            .await?;
+    } else {
+        let mut lines = Vec::new();
+        for position in positions.iter().take(8) {
+            lines.push(format!(
+                "- {} ({}) size {} avg {}",
+                position.title,
+                position.outcome,
+                format_decimal(position.size),
+                format_decimal(position.avg_price)
+            ));
+        }
+        let message = format!(
+            "Open positions for {label} ({count}):\n{lines}",
+            count = positions.len(),
+            lines = lines.join("\n")
+        );
+        bot.send_message(chat_id, message).await?;
+    }
+
+    send_manage_menu(bot, chat_id).await?;
+    Ok(())
+}
+
+async fn send_managed_wallet(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    user_id: i64,
+) -> ResponseResult<()> {
+    let wallet = match db::get_managed_wallet(db, user_id).await {
+        Ok(wallet) => wallet,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
                 .await?;
             return Ok(());
         }
     };
 
-    if wallets.is_empty() {
-        bot.send_message(chat_id, "No managed wallets yet.").await?;
+    let Some(wallet) = wallet else {
+        bot.send_message(chat_id, "No wallet setup.").await?;
         return Ok(());
-    }
+    };
 
-    let mut lines = Vec::with_capacity(wallets.len());
-    for wallet in wallets {
-        match wallet.label {
-            Some(label) => lines.push(format!("- {} ({})", wallet.wallet_address, label)),
-            None => lines.push(format!("- {}", wallet.wallet_address)),
+    let line = match wallet.label {
+        Some(label) => format!("- {} ({})", wallet.wallet_address, label),
+        None => format!("- {}", wallet.wallet_address),
+    };
+
+    let signature_type = signature_type_from_db(wallet.signature_type);
+    let wallet_type_label = format_signature_type(signature_type);
+    let mut message = format!("Managed wallet:\n{line}\nType: {wallet_type_label}");
+
+    if signature_type == SignatureType::Proxy {
+        if let Ok(address) = Address::from_str(&wallet.wallet_address) {
+            if let Some(proxy) = derive_proxy_wallet(address, POLYGON) {
+                message.push_str(&format!("\nProxy address: {proxy}"));
+            }
         }
     }
 
-    bot.send_message(chat_id, format!("Managed wallets:\n{}", lines.join("\n")))
+    bot.send_message(chat_id, message).await?;
+    Ok(())
+}
+
+async fn set_managed_wallet_type(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    user_id: i64,
+    signature_type: SignatureType,
+) -> ResponseResult<()> {
+    let wallet = match db::get_managed_wallet(db, user_id).await {
+        Ok(wallet) => wallet,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    let Some(_wallet) = wallet else {
+        bot.send_message(chat_id, "No wallet setup. Use Setup wallet first.")
+            .await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    let updated = match db::update_managed_wallet_signature_type(db, user_id, signature_type as i64)
+        .await
+    {
+        Ok(updated) => updated,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't update the wallet type.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    if updated {
+        let label = format_signature_type(signature_type);
+        bot.send_message(chat_id, format!("Wallet type set to {label}."))
+            .await?;
+    } else {
+        bot.send_message(chat_id, "No wallet to update.").await?;
+    }
+
+    send_manage_menu(bot, chat_id).await?;
+    Ok(())
+}
+
+async fn prompt_managed_wallet_removal(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    user_id: i64,
+) -> ResponseResult<()> {
+    let wallet = match db::get_managed_wallet(db, user_id).await {
+        Ok(wallet) => wallet,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    let Some(wallet) = wallet else {
+        bot.send_message(chat_id, "No wallet to remove.").await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    let label = wallet
+        .label
+        .as_deref()
+        .unwrap_or(wallet.wallet_address.as_str());
+    bot.send_message(chat_id, format!("Remove managed wallet {label}?"))
+        .reply_markup(manage_remove_confirm_markup())
         .await?;
+    Ok(())
+}
+
+async fn confirm_managed_wallet_removal(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    user_id: i64,
+) -> ResponseResult<()> {
+    let wallet = match db::get_managed_wallet(db, user_id).await {
+        Ok(wallet) => wallet,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    let Some(wallet) = wallet else {
+        bot.send_message(chat_id, "No wallet to remove.").await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    let removed = match db::remove_managed_wallet(db, user_id).await {
+        Ok(removed) => removed,
+        Err(_err) => {
+            bot.send_message(chat_id, "Sorry, I couldn't remove that wallet. Try again soon.")
+                .await?;
+            send_manage_menu(bot, chat_id).await?;
+            return Ok(());
+        }
+    };
+
+    if removed {
+        bot.send_message(
+            chat_id,
+            format!("Removed managed wallet {}.", wallet.wallet_address),
+        )
+        .await?;
+    } else {
+        bot.send_message(chat_id, "No wallet to remove.").await?;
+    }
+
+    send_manage_menu(bot, chat_id).await?;
     Ok(())
 }
 
@@ -1240,9 +1522,7 @@ async fn finalize_manage_label(
     label: Option<&str>,
 ) -> ResponseResult<()> {
     if let Some(label) = label {
-        if let Err(_err) =
-            db::update_managed_wallet_label(db, user_id, wallet_address, Some(label)).await
-        {
+        if let Err(_err) = db::update_managed_wallet_label(db, user_id, Some(label)).await {
             bot.send_message(chat_id, "Sorry, I couldn't update that wallet.")
                 .await?;
             return Ok(());
@@ -1263,13 +1543,12 @@ async fn finalize_manage_label(
 async fn load_managed_wallet_signer(
     db: &Db,
     user_id: i64,
-    wallet_address: &str,
     encryption_key: EncryptionKey,
-) -> Result<impl Signer, String> {
-    let wallet = match db::get_managed_wallet(db, user_id, wallet_address).await {
+) -> Result<(impl Signer, SignatureType), String> {
+    let wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(Some(wallet)) => wallet,
-        Ok(None) => return Err("That wallet is not managed yet.".to_string()),
-        Err(_) => return Err("Sorry, I couldn't load that wallet.".to_string()),
+        Ok(None) => return Err("No wallet setup. Use Setup wallet first.".to_string()),
+        Err(_) => return Err("Sorry, I couldn't load your managed wallet.".to_string()),
     };
 
     let aad = crypto::build_aad(user_id, &wallet.wallet_address);
@@ -1286,7 +1565,59 @@ async fn load_managed_wallet_signer(
         return Err("Stored key does not match the wallet address.".to_string());
     }
 
-    Ok(signer)
+    let signature_type = signature_type_from_db(wallet.signature_type);
+    Ok((signer, signature_type))
+}
+
+fn parse_signature_type(data: Option<&str>) -> SignatureType {
+    match data {
+        Some("sig:1") => SignatureType::Proxy,
+        Some("sig:2") => SignatureType::GnosisSafe,
+        _ => SignatureType::Eoa,
+    }
+}
+
+fn signature_type_from_db(raw: i64) -> SignatureType {
+    match raw {
+        1 => SignatureType::Proxy,
+        2 => SignatureType::GnosisSafe,
+        _ => SignatureType::Eoa,
+    }
+}
+
+fn format_signature_type(signature_type: SignatureType) -> &'static str {
+    match signature_type {
+        SignatureType::Proxy => "Email/Google login (Magic)",
+        SignatureType::GnosisSafe => "Gnosis Safe",
+        SignatureType::Eoa => "Standard wallet (MetaMask/Ledger)",
+    }
+}
+
+fn is_wallet_type_error(message: &str) -> bool {
+    let message = message.to_lowercase();
+    message.contains("signature type")
+        || message.contains("signaturetype")
+        || message.contains("wallet type")
+        || message.contains("proxy")
+        || message.contains("funder")
+        || message.contains("user type")
+}
+
+async fn send_wallet_type_error(
+    bot: &Bot,
+    chat_id: ChatId,
+    title: &str,
+    detail: &str,
+) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        format!(
+            "{title}: {detail}\nWallet type may be incorrect. Use Change wallet type."
+        ),
+    )
+    .reply_markup(manage_wallet_type_prompt_markup())
+    .await?;
+    Ok(())
 }
 
 fn parse_side(raw: &str) -> Option<Side> {

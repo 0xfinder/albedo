@@ -129,23 +129,25 @@ pub async fn list_tracked_wallets(db: &Db, user_id: i64) -> Result<Vec<models::T
     Ok(wallets)
 }
 
-pub async fn upsert_managed_wallet(
+pub async fn set_managed_wallet(
     db: &Db,
     user_id: i64,
     wallet_address: &str,
     encrypted_key: &[u8],
     nonce: &[u8],
     label: Option<&str>,
+    signature_type: i64,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO managed_wallets (user_id, wallet_address, encrypted_key, nonce, label) VALUES (?, ?, ?, ?, ?)\
-         ON CONFLICT(user_id, wallet_address) DO UPDATE SET encrypted_key = excluded.encrypted_key, nonce = excluded.nonce, label = COALESCE(excluded.label, managed_wallets.label)",
+        "INSERT INTO managed_wallets (user_id, wallet_address, encrypted_key, nonce, label, signature_type) VALUES (?, ?, ?, ?, ?, ?)\
+         ON CONFLICT(user_id) DO UPDATE SET wallet_address = excluded.wallet_address, encrypted_key = excluded.encrypted_key, nonce = excluded.nonce, label = excluded.label, signature_type = excluded.signature_type",
     )
     .bind(user_id)
     .bind(wallet_address)
     .bind(encrypted_key)
     .bind(nonce)
     .bind(label)
+    .bind(signature_type)
     .execute(db)
     .await?;
 
@@ -155,42 +157,22 @@ pub async fn upsert_managed_wallet(
 pub async fn update_managed_wallet_label(
     db: &Db,
     user_id: i64,
-    wallet_address: &str,
     label: Option<&str>,
 ) -> Result<()> {
-    sqlx::query(
-        "UPDATE managed_wallets SET label = ? WHERE user_id = ? AND wallet_address = ?",
-    )
-    .bind(label)
-    .bind(user_id)
-    .bind(wallet_address)
-    .execute(db)
-    .await?;
+    sqlx::query("UPDATE managed_wallets SET label = ? WHERE user_id = ?")
+        .bind(label)
+        .bind(user_id)
+        .execute(db)
+        .await?;
 
     Ok(())
 }
 
-pub async fn list_managed_wallets(db: &Db, user_id: i64) -> Result<Vec<models::ManagedWallet>> {
-    let wallets = sqlx::query_as::<_, models::ManagedWallet>(
-        "SELECT id, user_id, wallet_address, label, encrypted_key, nonce, created_at FROM managed_wallets WHERE user_id = ? ORDER BY created_at",
-    )
-    .bind(user_id)
-    .fetch_all(db)
-    .await?;
-
-    Ok(wallets)
-}
-
-pub async fn get_managed_wallet(
-    db: &Db,
-    user_id: i64,
-    wallet_address: &str,
-) -> Result<Option<models::ManagedWallet>> {
+pub async fn get_managed_wallet(db: &Db, user_id: i64) -> Result<Option<models::ManagedWallet>> {
     let wallet = sqlx::query_as::<_, models::ManagedWallet>(
-        "SELECT id, user_id, wallet_address, label, encrypted_key, nonce, created_at FROM managed_wallets WHERE user_id = ? AND wallet_address = ?",
+        "SELECT id, user_id, wallet_address, label, signature_type, encrypted_key, nonce, created_at FROM managed_wallets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
     )
     .bind(user_id)
-    .bind(wallet_address)
     .fetch_optional(db)
     .await?;
 
@@ -210,14 +192,25 @@ pub async fn list_managed_wallets_with_users(db: &Db) -> Result<Vec<ManagedWalle
     Ok(wallets)
 }
 
-pub async fn remove_managed_wallet(db: &Db, user_id: i64, wallet_address: &str) -> Result<bool> {
-    let result = sqlx::query(
-        "DELETE FROM managed_wallets WHERE user_id = ? AND wallet_address = ?",
-    )
-    .bind(user_id)
-    .bind(wallet_address)
-    .execute(db)
-    .await?;
+pub async fn remove_managed_wallet(db: &Db, user_id: i64) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM managed_wallets WHERE user_id = ?")
+        .bind(user_id)
+        .execute(db)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn update_managed_wallet_signature_type(
+    db: &Db,
+    user_id: i64,
+    signature_type: i64,
+) -> Result<bool> {
+    let result = sqlx::query("UPDATE managed_wallets SET signature_type = ? WHERE user_id = ?")
+        .bind(signature_type)
+        .bind(user_id)
+        .execute(db)
+        .await?;
 
     Ok(result.rows_affected() > 0)
 }

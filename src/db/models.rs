@@ -46,6 +46,7 @@ pub struct ManagedWallet {
     pub user_id: i64,
     pub wallet_address: String,
     pub label: Option<String>,
+    pub signature_type: i64,
     pub encrypted_key: Vec<u8>,
     pub nonce: Vec<u8>,
     pub created_at: String,
