@@ -128,24 +128,36 @@ pub async fn handle_callback(
     match data.as_str() {
         "menu:main" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            send_callback_menu(&bot, &query, "Choose a mode:", main_menu_markup()).await?;
+            send_callback_menu(&bot, &query, "What do you want to do?", main_menu_markup()).await?;
         }
         "menu:track" => {
             let _ = db::clear_pending_state(&db, user_id).await;
             let _ = db::set_mode(&db, user_id, "track").await;
-            send_callback_menu(&bot, &query, "Track menu:", track_menu_markup()).await?;
+            send_callback_menu(
+                &bot,
+                &query,
+                "Track wallets: add, remove, or review your list.",
+                track_menu_markup(),
+            )
+            .await?;
         }
         "menu:manage" => {
             let _ = db::clear_pending_state(&db, user_id).await;
             let _ = db::set_mode(&db, user_id, "manage").await;
-            send_callback_menu(&bot, &query, "Manage menu:", manage_menu_markup()).await?;
+            send_callback_menu(
+                &bot,
+                &query,
+                "Manage your trading wallet, orders, and positions.",
+                manage_menu_markup(),
+            )
+            .await?;
         }
         "manage:auth" => {
             let _ = db::clear_pending_state(&db, user_id).await;
             send_callback_menu(
                 &bot,
                 &query,
-                "Select the wallet type for this account.",
+                "Choose how this wallet should sign (Magic vs Standard).",
                 manage_wallet_type_setup_markup(),
             )
             .await?;
@@ -200,7 +212,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send: <token_id> <side> <amount> (buy uses USDC, sell uses shares).",
+                "Market order format: <token_id> <buy|sell> <amount> (buy uses USDC, sell uses shares).",
                 manage_cancel_menu_markup(),
             )
             .await?;
@@ -211,7 +223,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send: <token_id> <side> <price> <size>.",
+                "Limit order format: <token_id> <buy|sell> <price> <size>.",
                 manage_cancel_menu_markup(),
             )
             .await?;
@@ -222,7 +234,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send: <order_id>.",
+                "Cancel format: <order_id>.",
                 manage_cancel_menu_markup(),
             )
             .await?;
@@ -252,7 +264,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Select the wallet type for this account.",
+                "Choose how this wallet should sign (Magic vs Standard).",
                 manage_wallet_type_change_markup(),
             )
             .await?;
@@ -282,7 +294,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send the wallet address to track.",
+                "Send the wallet address you want to track (0x...).",
                 cancel_menu_markup(),
             )
             .await?;
@@ -292,7 +304,7 @@ pub async fn handle_callback(
             send_callback_menu(
                 &bot,
                 &query,
-                "Send the wallet address to remove.",
+                "Send the tracked address you want to remove.",
                 cancel_menu_markup(),
             )
             .await?;
@@ -363,11 +375,23 @@ pub async fn handle_callback(
         }
         "action:cancel" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            send_callback_menu(&bot, &query, "Track menu:", track_menu_markup()).await?;
+            send_callback_menu(
+                &bot,
+                &query,
+                "Track wallets: add, remove, or review your list.",
+                track_menu_markup(),
+            )
+            .await?;
         }
         "manage:cancel_action" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            send_callback_menu(&bot, &query, "Manage menu:", manage_menu_markup()).await?;
+            send_callback_menu(
+                &bot,
+                &query,
+                "Manage your trading wallet, orders, and positions.",
+                manage_menu_markup(),
+            )
+            .await?;
         }
         _ => {
             bot.answer_callback_query(query.id).await?;
@@ -392,7 +416,7 @@ async fn handle_top_level_command(
         }
         "manage" => {
             let _ = db::set_mode(db, user_id, "manage").await;
-            bot.send_message(msg.chat.id, "Manage menu:")
+            bot.send_message(msg.chat.id, "Manage your trading wallet, orders, and positions.")
                 .reply_markup(manage_menu_markup())
                 .await?;
         }
@@ -406,7 +430,7 @@ async fn handle_top_level_command(
 }
 
 async fn handle_start(bot: Bot, msg: Message) -> ResponseResult<()> {
-    bot.send_message(msg.chat.id, "Choose a mode:")
+    bot.send_message(msg.chat.id, "What do you want to do?")
         .reply_markup(main_menu_markup())
         .await?;
     Ok(())
@@ -610,11 +634,11 @@ async fn handle_pending_action(
 
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() != 3 {
-                bot.send_message(
-                    msg.chat.id,
-                    "Send: <token_id> <side> <amount> (buy uses USDC, sell uses shares).",
-                )
-                .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Market order format: <token_id> <buy|sell> <amount> (buy uses USDC, sell uses shares).",
+                    )
+                    .await?;
                 return Ok(());
             }
 
@@ -749,11 +773,11 @@ async fn handle_pending_action(
 
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() != 4 {
-                bot.send_message(
-                    msg.chat.id,
-                    "Send: <token_id> <side> <price> <size>.",
-                )
-                .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Limit order format: <token_id> <buy|sell> <price> <size>.",
+                    )
+                    .await?;
                 return Ok(());
             }
 
@@ -883,7 +907,7 @@ async fn handle_pending_action(
 
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() != 1 {
-                bot.send_message(msg.chat.id, "Send: <order_id>.")
+                bot.send_message(msg.chat.id, "Cancel format: <order_id>.")
                     .await?;
                 return Ok(());
             }
@@ -992,19 +1016,19 @@ fn parse_incoming_command(text: &str, bot_name: &str) -> Option<(String, Vec<Str
 
 fn main_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback("Track", "menu:track"),
-        InlineKeyboardButton::callback("Manage", "menu:manage"),
+        InlineKeyboardButton::callback("🧭 Track", "menu:track"),
+        InlineKeyboardButton::callback("⚙️ Manage", "menu:manage"),
     ]])
 }
 
 fn track_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
-            InlineKeyboardButton::callback("Add address", "track:add"),
-            InlineKeyboardButton::callback("Remove address", "track:remove"),
+            InlineKeyboardButton::callback("➕ Add address", "track:add"),
+            InlineKeyboardButton::callback("➖ Remove address", "track:remove"),
         ],
-        vec![InlineKeyboardButton::callback("View all", "track:list")],
-        vec![InlineKeyboardButton::callback("Back", "menu:main")],
+        vec![InlineKeyboardButton::callback("📋 View all", "track:list")],
+        vec![InlineKeyboardButton::callback("↩️ Back", "menu:main")],
     ])
 }
 
@@ -1018,23 +1042,23 @@ fn label_menu_markup() -> InlineKeyboardMarkup {
 fn manage_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
-            InlineKeyboardButton::callback("Setup wallet", "manage:auth"),
-            InlineKeyboardButton::callback("My wallet", "manage:list"),
+            InlineKeyboardButton::callback("🔐 Setup wallet", "manage:auth"),
+            InlineKeyboardButton::callback("👛 My wallet", "manage:list"),
         ],
         vec![InlineKeyboardButton::callback(
-            "Change wallet type",
+            "🔁 Change wallet type",
             "manage:wallet_type",
         )],
         vec![
-            InlineKeyboardButton::callback("Positions", "manage:positions"),
-            InlineKeyboardButton::callback("Market order", "manage:market_order"),
+            InlineKeyboardButton::callback("📈 Positions", "manage:positions"),
+            InlineKeyboardButton::callback("⚡️ Market order", "manage:market_order"),
         ],
         vec![
-            InlineKeyboardButton::callback("Limit order", "manage:limit_order"),
-            InlineKeyboardButton::callback("Cancel order", "manage:cancel_order"),
+            InlineKeyboardButton::callback("🎯 Limit order", "manage:limit_order"),
+            InlineKeyboardButton::callback("🛑 Cancel order", "manage:cancel_order"),
         ],
-        vec![InlineKeyboardButton::callback("Remove wallet", "manage:remove")],
-        vec![InlineKeyboardButton::callback("Back", "menu:main")],
+        vec![InlineKeyboardButton::callback("🗑️ Remove wallet", "manage:remove")],
+        vec![InlineKeyboardButton::callback("↩️ Back", "menu:main")],
     ])
 }
 
@@ -1131,7 +1155,7 @@ async fn send_callback_menu(
 }
 
 async fn send_track_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-    bot.send_message(chat_id, "Track menu:")
+    bot.send_message(chat_id, "Track wallets: add, remove, or review your list.")
         .reply_markup(track_menu_markup())
         .await?;
     Ok(())
@@ -1201,7 +1225,7 @@ async fn send_tracked_wallets(
     }
 
     let message = format!(
-        "Tracking {} wallet(s).\n{}",
+        "Tracking {} wallet(s). Here's your list:\n{}",
         lines.len(),
         lines.join("\n")
     );
@@ -1210,7 +1234,7 @@ async fn send_tracked_wallets(
 }
 
 async fn send_manage_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-    bot.send_message(chat_id, "Manage menu:")
+    bot.send_message(chat_id, "Manage your trading wallet, orders, and positions.")
         .reply_markup(manage_menu_markup())
         .await?;
     Ok(())
@@ -1304,8 +1328,7 @@ async fn send_managed_positions(
             ));
         }
         let message = format!(
-            "Open positions for {label} ({count}):\n{lines}",
-            count = positions.len(),
+            "Open positions for {label} (showing up to 8):\n{lines}",
             lines = lines.join("\n")
         );
         bot.send_message(chat_id, message).await?;
