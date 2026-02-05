@@ -240,16 +240,6 @@ pub async fn remove_tracked_wallet(db: &Db, user_id: i64, wallet_address: &str) 
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn count_tracked_wallets(db: &Db, user_id: i64) -> Result<i64> {
-    let (count,) =
-        sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM tracked_wallets WHERE user_id = ?")
-            .bind(user_id)
-            .fetch_one(db)
-            .await?;
-
-    Ok(count)
-}
-
 pub async fn update_tracked_wallet_activity_hash(
     db: &Db,
     user_id: i64,

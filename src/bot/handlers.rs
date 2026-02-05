@@ -1187,12 +1187,11 @@ async fn send_tracked_wallets(
     };
 
     if wallets.is_empty() {
-        bot.send_message(chat_id, "Tracking 0 wallets.\nNo tracked wallets yet.")
+        bot.send_message(chat_id, "Tracking 0 wallet(s).\nNo tracked wallets yet.")
             .await?;
         return Ok(());
     }
 
-    let wallet_label = if wallets.len() == 1 { "wallet" } else { "wallets" };
     let mut lines = Vec::with_capacity(wallets.len());
     for wallet in wallets {
         match wallet.label {
@@ -1202,9 +1201,8 @@ async fn send_tracked_wallets(
     }
 
     let message = format!(
-        "Tracking {} {}.\n{}",
+        "Tracking {} wallet(s).\n{}",
         lines.len(),
-        wallet_label,
         lines.join("\n")
     );
     bot.send_message(chat_id, message).await?;
