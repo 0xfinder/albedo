@@ -1013,10 +1013,7 @@ fn track_menu_markup() -> InlineKeyboardMarkup {
             InlineKeyboardButton::callback("Add address", "track:add"),
             InlineKeyboardButton::callback("Remove address", "track:remove"),
         ],
-        vec![
-            InlineKeyboardButton::callback("View all", "track:list"),
-            InlineKeyboardButton::callback("Status", "track:status"),
-        ],
+        vec![InlineKeyboardButton::callback("View all", "track:list")],
         vec![InlineKeyboardButton::callback("Back", "menu:main")],
     ])
 }
@@ -1200,10 +1197,12 @@ async fn send_tracked_wallets(
     };
 
     if wallets.is_empty() {
-        bot.send_message(chat_id, "No tracked wallets yet.").await?;
+        bot.send_message(chat_id, "Tracking 0 wallets.\nNo tracked wallets yet.")
+            .await?;
         return Ok(());
     }
 
+    let wallet_label = if wallets.len() == 1 { "wallet" } else { "wallets" };
     let mut lines = Vec::with_capacity(wallets.len());
     for wallet in wallets {
         match wallet.label {
@@ -1212,8 +1211,13 @@ async fn send_tracked_wallets(
         }
     }
 
-    bot.send_message(chat_id, format!("Tracked wallets:\n{}", lines.join("\n")))
-        .await?;
+    let message = format!(
+        "Tracking {} {}.\n{}",
+        lines.len(),
+        wallet_label,
+        lines.join("\n")
+    );
+    bot.send_message(chat_id, message).await?;
     Ok(())
 }
 
