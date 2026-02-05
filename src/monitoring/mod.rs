@@ -353,7 +353,7 @@ async fn poll_activity(
     wallet: &db::TrackedWalletWithUser,
     address: Address,
 ) -> color_eyre::eyre::Result<()> {
-    let request = ActivityRequest::builder().user(address).limit(20)?.build();
+    let request = ActivityRequest::builder().user(address).limit(500)?.build();
     let activities = match client.activity(&request).await {
         Ok(activities) => activities,
         Err(_) => return Ok(()),
@@ -558,12 +558,17 @@ impl ActivityNotification {
 }
 
 fn format_activity_message(label: &str, notification: &ActivityNotification) -> String {
+    let (emoji, action) = match notification.activity_type.as_str() {
+        "Buy" => ("🟢", "BUY"),
+        "Sell" => ("🔴", "SELL"),
+        "Redeem" | "Claim" => ("🟠", "CLOSED"),
+        _ => ("📊", &notification.activity_type as &str),
+    };
     let outcome = notification.outcome.as_deref().unwrap_or("N/A");
     let side = notification.side.as_deref().unwrap_or("N/A");
     let price = notification.price.as_deref().unwrap_or("N/A");
     format!(
-        "Activity for {label}\n{activity_type}: {market}\nOutcome: {outcome} | Side: {side}\nSize: {size} | USDC: {usdc} | Price: {price}\nTx: {tx} | Time: {timestamp}",
-        activity_type = notification.activity_type,
+        "{emoji} {action}\n\nActivity for {label}\nMarket: {market}\nOutcome: {outcome} | Side: {side}\nSize: {size} | USDC: {usdc} | Price: {price}\nTx: {tx} | Time: {timestamp}",
         market = notification.market,
         size = notification.size,
         usdc = notification.usdc_size,

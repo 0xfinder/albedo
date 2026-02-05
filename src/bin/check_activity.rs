@@ -91,7 +91,7 @@ async fn main() -> color_eyre::Result<()> {
             }
         };
 
-        let request = ActivityRequest::builder().user(address).limit(20)?.build();
+        let request = ActivityRequest::builder().user(address).limit(500)?.build();
         let activities = match client.activity(&request).await {
             Ok(activities) => activities,
             Err(err) => {
