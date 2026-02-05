@@ -15,6 +15,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
 use tokio::sync::Mutex;
 
@@ -304,7 +305,7 @@ mod tests {
     #[test]
     fn format_activity_message_complete() {
         let notification = ActivityNotification {
-            activity_type: "Trade".to_string(),
+            activity_type: "Buy".to_string(),
             market: "Bitcoin 100k".to_string(),
             market_slug: Some("btc-100k".to_string()),
             outcome: Some("Yes".to_string()),
@@ -315,16 +316,16 @@ mod tests {
             timestamp: 1700000000,
             tx_hash: "0xabc123".to_string(),
         };
-        let msg = format_activity_message("my_wallet", &notification);
+        let msg = format_activity_message("0x123abc", Some("my_wallet"), &notification);
+        assert!(msg.contains("0x123abc"));
         assert!(msg.contains("my_wallet"));
-        assert!(msg.contains("Trade"));
+        assert!(msg.contains("🟢 BUY"));
         assert!(msg.contains("Bitcoin 100k"));
+        assert!(msg.contains("btc-100k"));
         assert!(msg.contains("Yes"));
-        assert!(msg.contains("Buy"));
         assert!(msg.contains("10"));
-        assert!(msg.contains("5.50"));
-        assert!(msg.contains("0.55"));
-        assert!(msg.contains("0xabc123"));
+        assert!(msg.contains("5.50$"));
+        assert!(msg.contains("0.55$"));
     }
 
     #[test]
@@ -341,8 +342,9 @@ mod tests {
             timestamp: 1700000000,
             tx_hash: "0xdef456".to_string(),
         };
-        let msg = format_activity_message("wallet", &notification);
+        let msg = format_activity_message("0xwallet", None, &notification);
         assert!(msg.contains("N/A"));
+        assert!(!msg.contains("Name:"));
     }
 }
 
@@ -404,10 +406,6 @@ async fn poll_activity(
         return Ok(());
     }
 
-    let label = wallet
-        .label
-        .as_deref()
-        .unwrap_or(wallet.wallet_address.as_str());
     for activity in new_events.into_iter().rev() {
         let notification = ActivityNotification::from_activity(activity);
         let details = serde_json::to_string(&notification).ok();
@@ -432,9 +430,14 @@ async fn poll_activity(
             continue;
         }
 
-        let message = format_activity_message(label, &notification);
+        let message = format_activity_message(
+            &wallet.wallet_address,
+            wallet.label.as_deref(),
+            &notification,
+        );
         let _ = bot
             .send_message(teloxide::types::ChatId(wallet.chat_id), message)
+            .parse_mode(teloxide::types::ParseMode::Html)
             .await;
     }
 
@@ -557,23 +560,50 @@ impl ActivityNotification {
     }
 }
 
-fn format_activity_message(label: &str, notification: &ActivityNotification) -> String {
+fn format_activity_message(
+    wallet_address: &str,
+    label: Option<&str>,
+    notification: &ActivityNotification,
+) -> String {
     let (emoji, action) = match notification.activity_type.as_str() {
         "Buy" => ("🟢", "BUY"),
         "Sell" => ("🔴", "SELL"),
         "Redeem" | "Claim" => ("🟠", "CLOSED"),
         _ => ("📊", &notification.activity_type as &str),
     };
+
+    let name_line = match label {
+        Some(name) => format!(
+            "\nName: <a href=\"https://polymarket.com/profile/{wallet_address}\">{name}</a>"
+        ),
+        None => String::new(),
+    };
+
+    let market_line = match &notification.market_slug {
+        Some(slug) => format!(
+            "<a href=\"https://polymarket.com/event/{slug}\">{}</a>",
+            notification.market
+        ),
+        None => notification.market.clone(),
+    };
+
     let outcome = notification.outcome.as_deref().unwrap_or("N/A");
-    let side = notification.side.as_deref().unwrap_or("N/A");
-    let price = notification.price.as_deref().unwrap_or("N/A");
+    let price = notification
+        .price
+        .as_deref()
+        .map(|p| format!("{p}$"))
+        .unwrap_or_else(|| "N/A".to_string());
+    let value = format!("{}$", notification.usdc_size);
+
     format!(
-        "{emoji} {action}\n\nActivity for {label}\nMarket: {market}\nOutcome: {outcome} | Side: {side}\nSize: {size} | USDC: {usdc} | Price: {price}\nTx: {tx} | Time: {timestamp}",
-        market = notification.market,
+        "{emoji} {action}\n\n\
+        👛 Wallet: <code>{wallet_address}</code>{name_line}\n\
+        Market: {market_line}\n\
+        Outcome: {outcome}\n\
+        Size: {size}\n\
+        Price: {price}\n\
+        Value: {value}",
         size = notification.size,
-        usdc = notification.usdc_size,
-        tx = notification.tx_hash,
-        timestamp = notification.timestamp,
     )
 }
 
