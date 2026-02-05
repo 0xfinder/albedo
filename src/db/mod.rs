@@ -286,6 +286,107 @@ pub async fn update_tracked_wallet_positions_hash(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn setup_db() -> (Db, i64) {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")
+            .expect("valid sqlite memory options");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect sqlite memory");
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&pool)
+            .await
+            .expect("enable foreign keys");
+        sqlx::migrate!("./src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+
+        let user_id = ensure_user(&pool, 123, 456).await.expect("insert user");
+        (pool, user_id)
+    }
+
+    #[tokio::test]
+    async fn managed_wallet_set_and_get_persists_signature_type() {
+        let (db, user_id) = setup_db().await;
+
+        set_managed_wallet(&db, user_id, "0xabc", b"key", b"nonce", None, 1)
+            .await
+            .expect("set managed wallet");
+
+        let wallet = get_managed_wallet(&db, user_id)
+            .await
+            .expect("get managed wallet")
+            .expect("wallet exists");
+
+        assert_eq!(wallet.wallet_address, "0xabc");
+        assert_eq!(wallet.signature_type, 1);
+    }
+
+    #[tokio::test]
+    async fn managed_wallet_set_replaces_existing_wallet() {
+        let (db, user_id) = setup_db().await;
+
+        set_managed_wallet(&db, user_id, "0xfirst", b"key", b"nonce", None, 0)
+            .await
+            .expect("set managed wallet");
+        set_managed_wallet(&db, user_id, "0xsecond", b"key2", b"nonce2", None, 0)
+            .await
+            .expect("set managed wallet again");
+
+        let wallet = get_managed_wallet(&db, user_id)
+            .await
+            .expect("get managed wallet")
+            .expect("wallet exists");
+
+        assert_eq!(wallet.wallet_address, "0xsecond");
+    }
+
+    #[tokio::test]
+    async fn managed_wallet_signature_type_updates() {
+        let (db, user_id) = setup_db().await;
+
+        set_managed_wallet(&db, user_id, "0xabc", b"key", b"nonce", None, 0)
+            .await
+            .expect("set managed wallet");
+
+        let updated = update_managed_wallet_signature_type(&db, user_id, 1)
+            .await
+            .expect("update signature type");
+
+        assert!(updated);
+        let wallet = get_managed_wallet(&db, user_id)
+            .await
+            .expect("get managed wallet")
+            .expect("wallet exists");
+        assert_eq!(wallet.signature_type, 1);
+    }
+
+    #[tokio::test]
+    async fn managed_wallet_remove_clears_wallet() {
+        let (db, user_id) = setup_db().await;
+
+        set_managed_wallet(&db, user_id, "0xabc", b"key", b"nonce", None, 0)
+            .await
+            .expect("set managed wallet");
+
+        let removed = remove_managed_wallet(&db, user_id)
+            .await
+            .expect("remove managed wallet");
+
+        assert!(removed);
+        let wallet = get_managed_wallet(&db, user_id).await.expect("get managed wallet");
+        assert!(wallet.is_none());
+    }
+}
+
 pub async fn insert_activity_log(
     db: &Db,
     user_id: i64,

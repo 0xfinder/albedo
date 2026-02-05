@@ -1590,6 +1590,7 @@ fn format_signature_type(signature_type: SignatureType) -> &'static str {
         SignatureType::Proxy => "Email/Google login (Magic)",
         SignatureType::GnosisSafe => "Gnosis Safe",
         SignatureType::Eoa => "Standard wallet (MetaMask/Ledger)",
+        _ => "Standard wallet (MetaMask/Ledger)",
     }
 }
 
@@ -1638,4 +1639,46 @@ fn parse_decimal(raw: &str) -> Option<Decimal> {
 
 fn format_decimal(value: Decimal) -> String {
     value.normalize().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_signature_type_defaults_to_eoa() {
+        assert_eq!(parse_signature_type(None), SignatureType::Eoa);
+        assert_eq!(parse_signature_type(Some("unknown")), SignatureType::Eoa);
+    }
+
+    #[test]
+    fn parse_signature_type_maps_values() {
+        assert_eq!(parse_signature_type(Some("sig:0")), SignatureType::Eoa);
+        assert_eq!(parse_signature_type(Some("sig:1")), SignatureType::Proxy);
+        assert_eq!(parse_signature_type(Some("sig:2")), SignatureType::GnosisSafe);
+    }
+
+    #[test]
+    fn signature_type_from_db_maps_values() {
+        assert_eq!(signature_type_from_db(0), SignatureType::Eoa);
+        assert_eq!(signature_type_from_db(1), SignatureType::Proxy);
+        assert_eq!(signature_type_from_db(2), SignatureType::GnosisSafe);
+        assert_eq!(signature_type_from_db(99), SignatureType::Eoa);
+    }
+
+    #[test]
+    fn format_signature_type_is_user_friendly() {
+        assert_eq!(format_signature_type(SignatureType::Eoa), "Standard wallet (MetaMask/Ledger)");
+        assert_eq!(format_signature_type(SignatureType::Proxy), "Email/Google login (Magic)");
+        assert_eq!(format_signature_type(SignatureType::GnosisSafe), "Gnosis Safe");
+    }
+
+    #[test]
+    fn wallet_type_error_detection_matches_keywords() {
+        assert!(is_wallet_type_error("signature type mismatch"));
+        assert!(is_wallet_type_error("Proxy wallet derivation"));
+        assert!(is_wallet_type_error("Cannot have a funder address"));
+        assert!(is_wallet_type_error("USER TYPE invalid"));
+        assert!(!is_wallet_type_error("network timeout"));
+    }
 }
