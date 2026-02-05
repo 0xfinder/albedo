@@ -1236,6 +1236,13 @@ async fn send_tracked_wallets(
     );
     bot.send_message(chat_id, message)
         .parse_mode(ParseMode::Html)
+        .link_preview_options(teloxide::types::LinkPreviewOptions {
+            is_disabled: true,
+            url: None,
+            prefer_small_media: false,
+            prefer_large_media: false,
+            show_above_text: false,
+        })
         .await?;
     Ok(())
 }
