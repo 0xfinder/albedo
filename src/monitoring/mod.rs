@@ -321,7 +321,7 @@ mod tests {
         assert!(msg.contains("0x123abc"));
         assert!(msg.contains("my_wallet"));
         assert!(msg.contains("@polyuser"));
-        assert!(msg.contains("🟢 BUY"));
+        assert!(msg.contains("🟢 <b>BUY</b>"));
         assert!(msg.contains("Bitcoin 100k"));
         assert!(msg.contains("btc-100k"));
         assert!(msg.contains("Yes"));
@@ -623,7 +623,7 @@ fn format_activity_message(
     let value = format!("{}$", notification.usdc_size);
 
     format!(
-        "{emoji} {action}\n\n\
+        "{emoji} <b>{action}</b>\n\n\
         👛 Wallet: <code>{wallet_address}</code>{name_line}\n\
         Market: {market_line}\n\
         Outcome: {outcome}\n\
