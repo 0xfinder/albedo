@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use tokio::sync::Mutex;
 
 use crate::db::{self, Db};
@@ -315,6 +316,7 @@ mod tests {
             price: Some("0.55".to_string()),
             timestamp: 1700000000,
             tx_hash: "0xabc123".to_string(),
+            condition_id: None,
             username: Some("polyuser".to_string()),
         };
         let msg = format_activity_message("0x123abc", Some("my_wallet"), &notification);
@@ -343,6 +345,7 @@ mod tests {
             price: None,
             timestamp: 1700000000,
             tx_hash: "0xdef456".to_string(),
+            condition_id: None,
             username: None,
         };
         let msg = format_activity_message("0xwallet", None, &notification);
@@ -438,7 +441,7 @@ async fn poll_activity(
             wallet.label.as_deref(),
             &notification,
         );
-        let _ = bot
+        let mut request = bot
             .send_message(teloxide::types::ChatId(wallet.chat_id), message)
             .parse_mode(teloxide::types::ParseMode::Html)
             .link_preview_options(teloxide::types::LinkPreviewOptions {
@@ -447,15 +450,29 @@ async fn poll_activity(
                 prefer_small_media: false,
                 prefer_large_media: false,
                 show_above_text: false,
-            })
-            .await;
+            });
+        if let Some(condition_id) = &notification.condition_id {
+            if let Ok(cb_id) = db::insert_callback_data(
+                db,
+                &wallet.wallet_address,
+                condition_id,
+            )
+            .await
+            {
+                let markup = InlineKeyboardMarkup::new(vec![vec![
+                    InlineKeyboardButton::callback("📊 Show Positions", format!("sp:{cb_id}")),
+                ]]);
+                request = request.reply_markup(markup);
+            }
+        }
+        let _ = request.await;
     }
 
     Ok(())
 }
 
 async fn poll_positions(
-    bot: &teloxide::prelude::Bot,
+    _bot: &teloxide::prelude::Bot,
     client: &DataClient,
     db: &Db,
     wallet: &db::TrackedWalletWithUser,
@@ -486,18 +503,6 @@ async fn poll_positions(
     if last_hash.is_none() {
         return Ok(());
     }
-
-    let label = wallet
-        .label
-        .as_deref()
-        .unwrap_or(wallet.wallet_address.as_str());
-    let message = format!(
-        "Positions updated for {label}. Open positions: {count}.",
-        count = positions.len()
-    );
-    let _ = bot
-        .send_message(teloxide::types::ChatId(wallet.chat_id), message)
-        .await;
 
     Ok(())
 }
@@ -540,6 +545,7 @@ struct ActivityNotification {
     price: Option<String>,
     timestamp: i64,
     tx_hash: String,
+    condition_id: Option<String>,
     username: Option<String>,
 }
 
@@ -571,6 +577,7 @@ impl ActivityNotification {
             price: activity.price.map(format_decimal),
             timestamp: activity.timestamp,
             tx_hash: activity.transaction_hash.to_string(),
+            condition_id: activity.condition_id.map(|id| id.to_string()),
             username,
         }
     }

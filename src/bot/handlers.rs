@@ -5,7 +5,7 @@ use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::Client as DataClient;
-use polymarket_client_sdk::types::{Address, Decimal, U256};
+use polymarket_client_sdk::types::{Address, B256, Decimal, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
@@ -393,6 +393,19 @@ pub async fn handle_callback(
                 manage_menu_markup(),
             )
             .await?;
+        }
+        data if data.starts_with("sp:") => {
+            let chat_id = query
+                .message
+                .as_ref()
+                .map(|message| message.chat().id)
+                .unwrap_or(ChatId(query.from.id.0 as i64));
+            if let Some(id_str) = data.strip_prefix("sp:") {
+                if let Ok(cb_id) = id_str.parse::<i64>() {
+                    handle_show_positions(&bot, chat_id, &db, cb_id).await?;
+                }
+            }
+            bot.answer_callback_query(query.id).await?;
         }
         _ => {
             bot.answer_callback_query(query.id).await?;
@@ -1651,6 +1664,90 @@ fn html_escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+async fn handle_show_positions(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    cb_id: i64,
+) -> ResponseResult<()> {
+    let (wallet_address, condition_id_str) = match db::get_callback_data(db, cb_id).await {
+        Ok(Some(data)) => data,
+        _ => {
+            bot.send_message(chat_id, "Could not load position data.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let condition_id = match B256::from_str(&condition_id_str) {
+        Ok(id) => id,
+        Err(_) => {
+            bot.send_message(chat_id, "Invalid market identifier.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let address = match Address::from_str(&wallet_address) {
+        Ok(addr) => addr,
+        Err(_) => {
+            bot.send_message(chat_id, "Invalid wallet address.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let client = DataClient::default();
+    let builder = match PositionsRequest::builder().user(address).limit(200) {
+        Ok(builder) => builder,
+        Err(_) => {
+            bot.send_message(chat_id, "Could not build positions request.")
+                .await?;
+            return Ok(());
+        }
+    };
+    let request = builder.build();
+
+    let positions = match client.positions(&request).await {
+        Ok(positions) => positions,
+        Err(_) => {
+            bot.send_message(chat_id, "Could not fetch positions.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let matching: Vec<_> = positions
+        .iter()
+        .filter(|p| p.condition_id == condition_id)
+        .collect();
+
+    if matching.is_empty() {
+        bot.send_message(chat_id, "No open positions for this market.")
+            .await?;
+        return Ok(());
+    }
+
+    let title = &matching[0].title;
+    let mut lines = vec![format!("<b>{}</b>\n", html_escape(title))];
+    for pos in &matching {
+        let size = format_decimal(pos.size);
+        let avg = format_decimal(pos.avg_price);
+        let cur = format_decimal(pos.cur_price);
+        let pnl = format_decimal(pos.cash_pnl);
+        lines.push(format!(
+            "• {} — size: {size}, avg: {avg}¢, cur: {cur}¢, pnl: {pnl}$",
+            html_escape(&pos.outcome),
+        ));
+    }
+
+    bot.send_message(chat_id, lines.join("\n"))
+        .parse_mode(ParseMode::Html)
+        .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

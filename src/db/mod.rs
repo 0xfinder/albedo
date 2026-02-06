@@ -276,6 +276,33 @@ pub async fn update_tracked_wallet_positions_hash(
     Ok(())
 }
 
+pub async fn insert_callback_data(
+    db: &Db,
+    wallet_address: &str,
+    condition_id: &str,
+) -> Result<i64> {
+    let result = sqlx::query(
+        "INSERT INTO callback_data (wallet_address, condition_id) VALUES (?, ?)",
+    )
+    .bind(wallet_address)
+    .bind(condition_id)
+    .execute(db)
+    .await?;
+
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<(String, String)>> {
+    let row = sqlx::query_as::<_, (String, String)>(
+        "SELECT wallet_address, condition_id FROM callback_data WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+
+    Ok(row)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
