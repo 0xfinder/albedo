@@ -317,6 +317,7 @@ mod tests {
             timestamp: 1700000000,
             tx_hash: "0xabc123".to_string(),
             condition_id: None,
+            asset: None,
             username: Some("polyuser".to_string()),
         };
         let msg = format_activity_message("0x123abc", Some("my_wallet"), &notification);
@@ -346,11 +347,42 @@ mod tests {
             timestamp: 1700000000,
             tx_hash: "0xdef456".to_string(),
             condition_id: None,
+            asset: None,
             username: None,
         };
         let msg = format_activity_message("0xwallet", None, &notification);
         assert!(msg.contains("N/A"));
         assert!(!msg.contains("Name:"));
+    }
+
+    #[test]
+    fn is_tradeable_activity_buy() {
+        assert!(is_tradeable_activity("Buy"));
+    }
+
+    #[test]
+    fn is_tradeable_activity_sell() {
+        assert!(is_tradeable_activity("Sell"));
+    }
+
+    #[test]
+    fn is_tradeable_activity_trade() {
+        assert!(is_tradeable_activity("Trade"));
+    }
+
+    #[test]
+    fn is_tradeable_activity_redeem() {
+        assert!(!is_tradeable_activity("Redeem"));
+    }
+
+    #[test]
+    fn is_tradeable_activity_claim() {
+        assert!(!is_tradeable_activity("Claim"));
+    }
+
+    #[test]
+    fn is_tradeable_activity_reward() {
+        assert!(!is_tradeable_activity("Reward"));
     }
 }
 
@@ -452,16 +484,39 @@ async fn poll_activity(
                 show_above_text: false,
             });
         if let Some(condition_id) = &notification.condition_id {
+            let (trade_token, trade_side, trade_price, trade_size) =
+                if is_tradeable_activity(&notification.activity_type) {
+                    (
+                        notification.asset.as_deref(),
+                        notification.side.as_deref(),
+                        notification.price.as_deref(),
+                        Some(notification.size.as_str()),
+                    )
+                } else {
+                    (None, None, None, None)
+                };
             if let Ok(cb_id) = db::insert_callback_data(
                 db,
                 &wallet.wallet_address,
                 condition_id,
+                trade_token,
+                trade_side,
+                trade_price,
+                trade_size,
+                Some(notification.market.as_str()),
+                notification.outcome.as_deref(),
             )
             .await
             {
-                let markup = InlineKeyboardMarkup::new(vec![vec![
+                let mut buttons = vec![
                     InlineKeyboardButton::callback("📊 Show Positions", format!("sp:{cb_id}")),
-                ]]);
+                ];
+                if trade_token.is_some() {
+                    buttons.push(
+                        InlineKeyboardButton::callback("📋 Copy Trade", format!("ct:{cb_id}")),
+                    );
+                }
+                let markup = InlineKeyboardMarkup::new(vec![buttons]);
                 request = request.reply_markup(markup);
             }
         }
@@ -533,6 +588,10 @@ fn format_decimal(value: Decimal) -> String {
     value.normalize().to_string()
 }
 
+fn is_tradeable_activity(activity_type: &str) -> bool {
+    matches!(activity_type, "Buy" | "Sell" | "Trade")
+}
+
 #[derive(Debug, Serialize)]
 struct ActivityNotification {
     activity_type: String,
@@ -546,6 +605,7 @@ struct ActivityNotification {
     timestamp: i64,
     tx_hash: String,
     condition_id: Option<String>,
+    asset: Option<String>,
     username: Option<String>,
 }
 
@@ -563,9 +623,9 @@ impl ActivityNotification {
             .or_else(|| activity.slug.clone())
             .unwrap_or_else(|| "Unknown market".to_string());
         let username = activity
-            .pseudonym
+            .name
             .clone()
-            .or_else(|| activity.name.clone());
+            .or_else(|| activity.pseudonym.clone());
         Self {
             activity_type: format!("{:?}", activity.activity_type),
             market,
@@ -578,6 +638,7 @@ impl ActivityNotification {
             timestamp: activity.timestamp,
             tx_hash: activity.transaction_hash.to_string(),
             condition_id: activity.condition_id.map(|id| id.to_string()),
+            asset: activity.asset.map(|a| a.to_string()),
             username,
         }
     }
