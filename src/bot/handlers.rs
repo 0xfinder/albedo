@@ -1904,7 +1904,7 @@ async fn handle_show_positions(
         let purchased_value = number_format::format_usd(pos.size * pos.avg_price);
         let current_value = number_format::format_usd(pos.size * pos.cur_price);
         lines.push(format!(
-            "• {} — size: {size}, avg: {avg}, cur: {cur}, pnl: {pnl}, purchased: {purchased_value}, value: {current_value}",
+            "• {} — size: {size}, avg: {avg}, cur: {cur}, purchased: {purchased_value}, value: {current_value}, pnl: {pnl}",
             html_escape(&pos.outcome),
         ));
     }
