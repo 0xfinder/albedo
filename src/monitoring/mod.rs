@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
+use crate::utils::number_format;
 
 const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
@@ -262,19 +263,19 @@ mod tests {
     #[test]
     fn format_decimal_normalizes() {
         let d = Decimal::from_str("1.50000").unwrap();
-        assert_eq!(format_decimal(d), "1.5");
+        assert_eq!(format_decimal(d), "1.500");
     }
 
     #[test]
     fn format_decimal_preserves_integer() {
         let d = Decimal::from_str("100").unwrap();
-        assert_eq!(format_decimal(d), "100");
+        assert_eq!(format_decimal(d), "100.000");
     }
 
     #[test]
     fn format_optional_decimal_some() {
         let d = Some(Decimal::from_str("2.5").unwrap());
-        assert_eq!(format_optional_decimal(d), "2.5");
+        assert_eq!(format_optional_decimal(d), "2.500");
     }
 
     #[test]
@@ -328,9 +329,9 @@ mod tests {
         assert!(msg.contains("Bitcoin 100k"));
         assert!(msg.contains("btc-100k"));
         assert!(msg.contains("Yes"));
-        assert!(msg.contains("10"));
-        assert!(msg.contains("5.50$"));
-        assert!(msg.contains("0.55$"));
+        assert!(msg.contains("10.000"));
+        assert!(msg.contains("$5.500"));
+        assert!(msg.contains("$0.550 (1.82)"));
     }
 
     #[test]
@@ -585,7 +586,7 @@ fn hash_positions(positions: &[polymarket_client_sdk::data::types::response::Pos
 }
 
 fn format_decimal(value: Decimal) -> String {
-    value.normalize().to_string()
+    number_format::format_value(value)
 }
 
 fn is_tradeable_activity(activity_type: &str) -> bool {
@@ -683,12 +684,19 @@ fn format_activity_message(
     };
 
     let outcome = notification.outcome.as_deref().unwrap_or("N/A");
+    let size = Decimal::from_str(notification.size.as_str())
+        .ok()
+        .map(number_format::format_value)
+        .unwrap_or_else(|| notification.size.clone());
     let price = notification
         .price
         .as_deref()
-        .map(|p| format!("{p}$"))
+        .and_then(number_format::format_price_with_odds_str)
         .unwrap_or_else(|| "N/A".to_string());
-    let value = format!("{}$", notification.usdc_size);
+    let value = Decimal::from_str(notification.usdc_size.as_str())
+        .ok()
+        .map(number_format::format_usd)
+        .unwrap_or_else(|| format!("${}", notification.usdc_size));
 
     format!(
         "{emoji} <b>{action}</b>\n\n\
@@ -698,7 +706,6 @@ fn format_activity_message(
         Size: {size}\n\
         Price: {price}\n\
         Value: {value}",
-        size = notification.size,
     )
 }
 
@@ -833,7 +840,7 @@ fn format_ws_trade_message(label: &str, trade: &TradeMessage, market_label: &str
         market = market_label,
         asset = trade.asset_id,
         size = format_decimal(trade.size),
-        price = format_decimal(trade.price),
+        price = number_format::format_price_with_odds(trade.price),
     )
 }
 
@@ -857,12 +864,10 @@ fn format_ws_order_message(label: &str, order: &OrderMessage, market_label: &str
         market = market_label,
         asset = order.asset_id,
         side = format!("{:?}", order.side),
-        price = format_decimal(order.price),
+        price = number_format::format_price_with_odds(order.price),
     )
 }
 
 fn format_optional_decimal(value: Option<Decimal>) -> String {
-    value
-        .map(format_decimal)
-        .unwrap_or_else(|| "N/A".to_string())
+    number_format::format_option_value(value)
 }

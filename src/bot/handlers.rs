@@ -14,6 +14,7 @@ use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
+use crate::utils::number_format;
 
 const HELP_TEXT: &str = "Available commands:\n\
 /start - Start the bot\n\
@@ -1514,7 +1515,7 @@ async fn send_managed_positions(
                 position.title,
                 position.outcome,
                 format_decimal(position.size),
-                format_decimal(position.avg_price)
+                number_format::format_price_with_odds(position.avg_price)
             ));
         }
         let message = format!(
@@ -1820,7 +1821,7 @@ fn parse_decimal(raw: &str) -> Option<Decimal> {
 }
 
 fn format_decimal(value: Decimal) -> String {
-    value.normalize().to_string()
+    number_format::format_value(value)
 }
 
 fn html_escape(text: &str) -> String {
@@ -1897,11 +1898,11 @@ async fn handle_show_positions(
     let mut lines = vec![format!("<b>{}</b>\n", html_escape(title))];
     for pos in &matching {
         let size = format_decimal(pos.size);
-        let avg = format_decimal(pos.avg_price);
-        let cur = format_decimal(pos.cur_price);
-        let pnl = format_decimal(pos.cash_pnl);
+        let avg = number_format::format_price_with_odds(pos.avg_price);
+        let cur = number_format::format_price_with_odds(pos.cur_price);
+        let pnl = number_format::format_usd(pos.cash_pnl);
         lines.push(format!(
-            "• {} — size: {size}, avg: {avg}¢, cur: {cur}¢, pnl: {pnl}$",
+            "• {} — size: {size}, avg: {avg}, cur: {cur}, pnl: {pnl}",
             html_escape(&pos.outcome),
         ));
     }
@@ -1928,17 +1929,26 @@ fn format_copy_trade_preview(state: &db::CopyTradeState) -> String {
     let price_line = if state.order_type == "market" {
         "Price: at market".to_string()
     } else {
-        format!("Price: {}¢ (limit)", state.price)
+        match parse_decimal(&state.price) {
+            Some(price) => format!(
+                "Price: {} (limit)",
+                number_format::format_price_with_odds(price)
+            ),
+            None => "Price: N/A (limit)".to_string(),
+        }
     };
 
     let est_cost = if state.order_type == "market" {
         "Est. Cost: at market".to_string()
     } else {
         match (parse_decimal(&state.price), parse_decimal(&state.size)) {
-            (Some(p), Some(s)) => format!("Est. Cost: ${}", format_decimal(p * s)),
+            (Some(p), Some(s)) => format!("Est. Cost: {}", number_format::format_usd(p * s)),
             _ => "Est. Cost: N/A".to_string(),
         }
     };
+    let size_display = parse_decimal(&state.size)
+        .map(format_decimal)
+        .unwrap_or_else(|| state.size.clone());
 
     format!(
         "{side_emoji} <b>Copy Trade</b>\n\n\
@@ -1950,7 +1960,7 @@ fn format_copy_trade_preview(state: &db::CopyTradeState) -> String {
          {est_cost}",
         market = html_escape(market),
         outcome = html_escape(outcome),
-        size = state.size,
+        size = size_display,
     )
 }
 
@@ -2396,10 +2406,10 @@ mod tests {
         assert!(preview.contains("Team A vs Team B"));
         assert!(preview.contains("Team A"));
         assert!(preview.contains("BUY"));
-        assert!(preview.contains("0.47¢"));
-        assert!(preview.contains("100"));
+        assert!(preview.contains("$0.470 (2.13)"));
+        assert!(preview.contains("100.000"));
         assert!(preview.contains("limit"));
-        assert!(preview.contains("$47"));
+        assert!(preview.contains("$47.000"));
     }
 
     #[test]
@@ -2418,7 +2428,7 @@ mod tests {
         let preview = format_copy_trade_preview(&state);
         assert!(preview.contains("SELL"));
         assert!(preview.contains("at market"));
-        assert!(!preview.contains("0.53¢"));
+        assert!(!preview.contains("$0.530"));
     }
 
     #[test]
