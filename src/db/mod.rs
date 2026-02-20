@@ -28,6 +28,31 @@ pub struct ManagedWalletWithUser {
     pub nonce: Vec<u8>,
 }
 
+#[derive(Debug, FromRow)]
+pub struct CallbackData {
+    pub wallet_address: String,
+    pub condition_id: String,
+    pub token_id: Option<String>,
+    pub side: Option<String>,
+    pub price: Option<String>,
+    pub size: Option<String>,
+    pub market_title: Option<String>,
+    pub outcome: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+pub struct CopyTradeState {
+    pub id: i64,
+    pub user_id: i64,
+    pub token_id: String,
+    pub side: String,
+    pub price: String,
+    pub size: String,
+    pub order_type: String,
+    pub market_title: Option<String>,
+    pub outcome: Option<String>,
+}
+
 pub async fn init(database_url: &str) -> Result<Db> {
     let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
     let pool = SqlitePool::connect_with(options).await?;
@@ -280,27 +305,112 @@ pub async fn insert_callback_data(
     db: &Db,
     wallet_address: &str,
     condition_id: &str,
+    token_id: Option<&str>,
+    side: Option<&str>,
+    price: Option<&str>,
+    size: Option<&str>,
+    market_title: Option<&str>,
+    outcome: Option<&str>,
 ) -> Result<i64> {
     let result = sqlx::query(
-        "INSERT INTO callback_data (wallet_address, condition_id) VALUES (?, ?)",
+        "INSERT INTO callback_data (wallet_address, condition_id, token_id, side, price, size, market_title, outcome) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(wallet_address)
     .bind(condition_id)
+    .bind(token_id)
+    .bind(side)
+    .bind(price)
+    .bind(size)
+    .bind(market_title)
+    .bind(outcome)
     .execute(db)
     .await?;
 
     Ok(result.last_insert_rowid())
 }
 
-pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<(String, String)>> {
-    let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT wallet_address, condition_id FROM callback_data WHERE id = ?",
+pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<CallbackData>> {
+    let row = sqlx::query_as::<_, CallbackData>(
+        "SELECT wallet_address, condition_id, token_id, side, price, size, market_title, outcome FROM callback_data WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(db)
     .await?;
 
     Ok(row)
+}
+
+pub async fn insert_copy_trade_state(
+    db: &Db,
+    user_id: i64,
+    token_id: &str,
+    side: &str,
+    price: &str,
+    size: &str,
+    order_type: &str,
+    market_title: Option<&str>,
+    outcome: Option<&str>,
+) -> Result<i64> {
+    let result = sqlx::query(
+        "INSERT INTO copy_trade_state (user_id, token_id, side, price, size, order_type, market_title, outcome) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(token_id)
+    .bind(side)
+    .bind(price)
+    .bind(size)
+    .bind(order_type)
+    .bind(market_title)
+    .bind(outcome)
+    .execute(db)
+    .await?;
+
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn get_copy_trade_state(db: &Db, id: i64) -> Result<Option<CopyTradeState>> {
+    let row = sqlx::query_as::<_, CopyTradeState>(
+        "SELECT id, user_id, token_id, side, price, size, order_type, market_title, outcome \
+         FROM copy_trade_state WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn update_copy_trade_field(
+    db: &Db,
+    id: i64,
+    field: &str,
+    value: &str,
+) -> Result<bool> {
+    let query = match field {
+        "side" => "UPDATE copy_trade_state SET side = ? WHERE id = ?",
+        "price" => "UPDATE copy_trade_state SET price = ? WHERE id = ?",
+        "size" => "UPDATE copy_trade_state SET size = ? WHERE id = ?",
+        "order_type" => "UPDATE copy_trade_state SET order_type = ? WHERE id = ?",
+        _ => return Ok(false),
+    };
+    let result = sqlx::query(query)
+        .bind(value)
+        .bind(id)
+        .execute(db)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn delete_copy_trade_state(db: &Db, id: i64) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM copy_trade_state WHERE id = ?")
+        .bind(id)
+        .execute(db)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 #[cfg(test)]
@@ -401,6 +511,233 @@ mod tests {
         assert!(removed);
         let wallet = get_managed_wallet(&db, user_id).await.expect("get managed wallet");
         assert!(wallet.is_none());
+    }
+
+    #[tokio::test]
+    async fn callback_data_insert_and_get() {
+        let (db, _user_id) = setup_db().await;
+
+        let id = insert_callback_data(&db, "0xabc", "0xcond", None, None, None, None, None, None)
+            .await
+            .expect("insert callback_data");
+
+        let data = get_callback_data(&db, id)
+            .await
+            .expect("get callback_data")
+            .expect("row exists");
+
+        assert_eq!(data.wallet_address, "0xabc");
+        assert_eq!(data.condition_id, "0xcond");
+        assert!(data.token_id.is_none());
+        assert!(data.side.is_none());
+    }
+
+    #[tokio::test]
+    async fn callback_data_with_trade_fields() {
+        let (db, _user_id) = setup_db().await;
+
+        let id = insert_callback_data(
+            &db, "0xabc", "0xcond",
+            Some("12345"), Some("Buy"), Some("0.47"), Some("100"),
+            Some("Team A vs B"), Some("Team A"),
+        )
+        .await
+        .expect("insert callback_data");
+
+        let data = get_callback_data(&db, id)
+            .await
+            .expect("get callback_data")
+            .expect("row exists");
+
+        assert_eq!(data.token_id.as_deref(), Some("12345"));
+        assert_eq!(data.side.as_deref(), Some("Buy"));
+        assert_eq!(data.price.as_deref(), Some("0.47"));
+        assert_eq!(data.size.as_deref(), Some("100"));
+        assert_eq!(data.market_title.as_deref(), Some("Team A vs B"));
+        assert_eq!(data.outcome.as_deref(), Some("Team A"));
+    }
+
+    #[tokio::test]
+    async fn callback_data_not_found() {
+        let (db, _user_id) = setup_db().await;
+
+        let data = get_callback_data(&db, 99999)
+            .await
+            .expect("get callback_data");
+
+        assert!(data.is_none());
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_insert_and_get() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit",
+            Some("Team A vs B"), Some("Team A"),
+        )
+        .await
+        .expect("insert copy_trade_state");
+
+        let state = get_copy_trade_state(&db, id)
+            .await
+            .expect("get copy_trade_state")
+            .expect("row exists");
+
+        assert_eq!(state.user_id, user_id);
+        assert_eq!(state.token_id, "token123");
+        assert_eq!(state.side, "Buy");
+        assert_eq!(state.price, "0.47");
+        assert_eq!(state.size, "100");
+        assert_eq!(state.order_type, "limit");
+        assert_eq!(state.market_title.as_deref(), Some("Team A vs B"));
+        assert_eq!(state.outcome.as_deref(), Some("Team A"));
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_not_found() {
+        let (db, _user_id) = setup_db().await;
+
+        let state = get_copy_trade_state(&db, 99999)
+            .await
+            .expect("get copy_trade_state");
+
+        assert!(state.is_none());
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_update_side() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+        )
+        .await
+        .expect("insert");
+
+        let updated = update_copy_trade_field(&db, id, "side", "Sell")
+            .await
+            .expect("update side");
+        assert!(updated);
+
+        let state = get_copy_trade_state(&db, id)
+            .await
+            .expect("get")
+            .expect("exists");
+        assert_eq!(state.side, "Sell");
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_update_price() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+        )
+        .await
+        .expect("insert");
+
+        let updated = update_copy_trade_field(&db, id, "price", "0.55")
+            .await
+            .expect("update price");
+        assert!(updated);
+
+        let state = get_copy_trade_state(&db, id)
+            .await
+            .expect("get")
+            .expect("exists");
+        assert_eq!(state.price, "0.55");
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_update_size() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+        )
+        .await
+        .expect("insert");
+
+        let updated = update_copy_trade_field(&db, id, "size", "200")
+            .await
+            .expect("update size");
+        assert!(updated);
+
+        let state = get_copy_trade_state(&db, id)
+            .await
+            .expect("get")
+            .expect("exists");
+        assert_eq!(state.size, "200");
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_update_order_type() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+        )
+        .await
+        .expect("insert");
+
+        let updated = update_copy_trade_field(&db, id, "order_type", "market")
+            .await
+            .expect("update order_type");
+        assert!(updated);
+
+        let state = get_copy_trade_state(&db, id)
+            .await
+            .expect("get")
+            .expect("exists");
+        assert_eq!(state.order_type, "market");
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_update_invalid_field() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+        )
+        .await
+        .expect("insert");
+
+        let updated = update_copy_trade_field(&db, id, "invalid_field", "value")
+            .await
+            .expect("update invalid field");
+        assert!(!updated);
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_delete() {
+        let (db, user_id) = setup_db().await;
+
+        let id = insert_copy_trade_state(
+            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+        )
+        .await
+        .expect("insert");
+
+        let deleted = delete_copy_trade_state(&db, id)
+            .await
+            .expect("delete");
+        assert!(deleted);
+
+        let state = get_copy_trade_state(&db, id)
+            .await
+            .expect("get");
+        assert!(state.is_none());
+    }
+
+    #[tokio::test]
+    async fn copy_trade_state_delete_nonexistent() {
+        let (db, _user_id) = setup_db().await;
+
+        let deleted = delete_copy_trade_state(&db, 99999)
+            .await
+            .expect("delete");
+        assert!(!deleted);
     }
 }
 
