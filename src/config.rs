@@ -8,7 +8,6 @@ pub struct Config {
     pub telegram_token: String,
     pub database_url: String,
     pub data_poll_seconds: u64,
-    pub polymarket_private_key: Option<String>,
     pub encryption_key: Option<EncryptionKey>,
 }
 
@@ -24,14 +23,12 @@ impl Config {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(1);
-        let polymarket_private_key = env::var("POLYMARKET_PRIVATE_KEY").ok();
         let encryption_key = read_encryption_key()?;
 
         Ok(Self {
             telegram_token: env::var("TELEGRAM_TOKEN").context("TELEGRAM_TOKEN not set")?,
             database_url,
             data_poll_seconds,
-            polymarket_private_key,
             encryption_key,
         })
     }

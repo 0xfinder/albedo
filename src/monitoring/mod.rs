@@ -70,19 +70,12 @@ pub fn spawn_ws_user_events(
     bot: teloxide::prelude::Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
-    polymarket_private_key: Option<String>,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    if encryption_key.is_none() && polymarket_private_key.is_none() {
+    if encryption_key.is_none() {
         return None;
     }
 
     Some(tokio::spawn(async move {
-        if let Some(private_key) = polymarket_private_key {
-            tokio::spawn(async move {
-                let _ = connect_env_user_events(private_key).await;
-            });
-        }
-
         if let Some(encryption_key) = encryption_key {
             let wallets = match db::list_managed_wallets_with_users(&db).await {
                 Ok(wallets) => wallets,
@@ -113,6 +106,7 @@ struct StreamOutcome {
     exit: StreamExit,
 }
 
+#[cfg(test)]
 async fn consume_user_event_stream<S, T, E>(mut stream: S) -> StreamOutcome
 where
     S: Stream<Item = Result<T, E>> + Unpin,
@@ -179,24 +173,6 @@ where
         tokio::time::sleep(backoff).await;
         backoff = std::cmp::min(backoff.saturating_mul(2), Duration::from_millis(WS_BACKOFF_MAX_MS));
     }
-}
-
-async fn connect_env_user_events(private_key: String) -> color_eyre::eyre::Result<()> {
-    run_ws_with_backoff(|| connect_env_user_events_once(private_key.clone())).await
-}
-
-async fn connect_env_user_events_once(
-    private_key: String,
-) -> color_eyre::eyre::Result<StreamOutcome> {
-    let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
-    let address = signer.address();
-    let credentials = ClobClient::default()
-        .create_or_derive_api_key(&signer, None)
-        .await?;
-
-    let client = WsClient::default().authenticate(credentials, address)?;
-    let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
-    Ok(consume_user_event_stream(stream).await)
 }
 
 async fn connect_user_events(

@@ -32,7 +32,6 @@ async fn main() -> Result<()> {
         bot.clone(),
         db.clone(),
         config.encryption_key.clone(),
-        config.polymarket_private_key.clone(),
     );
 
     // Start bot dispatcher

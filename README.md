@@ -40,11 +40,6 @@ Personal Telegram bot because the Polymarket UI sucks.
    # Optional - for encrypting managed wallet private keys
    # Generate with: openssl rand -hex 32
    ENCRYPTION_KEY=your_64_char_hex_key
-
-   # Optional - for real-time WebSocket notifications on your own wallet
-   # Export from Polymarket: Profile -> Cash -> ... -> Export Private Key
-   # API credentials are derived automatically from this key
-   POLYMARKET_PRIVATE_KEY=your_private_key
    ```
 
 4. Build and run:
