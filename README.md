@@ -10,7 +10,7 @@ Personal Telegram bot because the Polymarket UI sucks.
 
 ## Requirements
 
-- Rust (1.70+)
+- Rust (1.88+)
 - SQLite
 
 ## Setup
