@@ -405,7 +405,8 @@ pub async fn handle_callback(
                 .unwrap_or(ChatId(query.from.id.0 as i64));
             if let Some(id_str) = data.strip_prefix("sp:") {
                 if let Ok(cb_id) = id_str.parse::<i64>() {
-                    handle_show_positions(&bot, chat_id, &db, cb_id).await?;
+                    handle_show_positions(&bot, chat_id, &db, cb_id, query.message.as_ref())
+                        .await?;
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -1835,26 +1836,34 @@ async fn handle_show_positions(
     chat_id: ChatId,
     db: &Db,
     cb_id: i64,
+    source_message: Option<&teloxide::types::MaybeInaccessibleMessage>,
 ) -> ResponseResult<()> {
-    let cb_data = match db::get_callback_data(db, cb_id).await {
-        Ok(Some(data)) => data,
-        _ => {
-            bot.send_message(chat_id, "Could not load position data.")
-                .await?;
-            return Ok(());
+    let callback_data = db::get_callback_data(db, cb_id).await.ok().flatten();
+    let wallet_address = match callback_data.as_ref() {
+        Some(data) => data.wallet_address.clone(),
+        None => {
+            let wallet = source_message
+                .and_then(|message| message.regular_message())
+                .and_then(|message| message.text())
+                .and_then(extract_wallet_address_from_text);
+            match wallet {
+                Some(wallet) => wallet,
+                None => {
+                    bot.send_message(
+                        chat_id,
+                        "Could not load position data. This button may be outdated; try a newer activity message.",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
         }
     };
+    let condition_id = callback_data
+        .as_ref()
+        .and_then(|data| B256::from_str(&data.condition_id).ok());
 
-    let condition_id = match B256::from_str(&cb_data.condition_id) {
-        Ok(id) => id,
-        Err(_) => {
-            bot.send_message(chat_id, "Invalid market identifier.")
-                .await?;
-            return Ok(());
-        }
-    };
-
-    let address = match Address::from_str(&cb_data.wallet_address) {
+    let address = match Address::from_str(&wallet_address) {
         Ok(addr) => addr,
         Err(_) => {
             bot.send_message(chat_id, "Invalid wallet address.")
@@ -1883,19 +1892,34 @@ async fn handle_show_positions(
         }
     };
 
-    let matching: Vec<_> = positions
-        .iter()
-        .filter(|p| p.condition_id == condition_id)
-        .collect();
+    let matching: Vec<_> = match condition_id {
+        Some(condition_id) => positions
+            .iter()
+            .filter(|p| p.condition_id == condition_id)
+            .collect(),
+        None => positions.iter().collect(),
+    };
 
     if matching.is_empty() {
-        bot.send_message(chat_id, "No open positions for this market.")
+        let message = if condition_id.is_some() {
+            "No open positions for this market."
+        } else {
+            "No open positions for this wallet."
+        };
+        bot.send_message(chat_id, message)
             .await?;
         return Ok(());
     }
 
-    let title = &matching[0].title;
-    let mut lines = vec![format!("<b>{}</b>\n", html_escape(title))];
+    let mut lines = if condition_id.is_some() {
+        let title = &matching[0].title;
+        vec![format!("<b>{}</b>\n", html_escape(title))]
+    } else {
+        vec![format!(
+            "<b>Open Positions</b> for <code>{}</code>\n",
+            html_escape(&wallet_address)
+        )]
+    };
     for pos in &matching {
         let size = format_decimal(pos.size);
         let avg = number_format::format_price_with_odds(pos.avg_price);
@@ -1903,10 +1927,18 @@ async fn handle_show_positions(
         let pnl = number_format::format_usd(pos.cash_pnl);
         let purchased_value = number_format::format_usd(pos.size * pos.avg_price);
         let current_value = number_format::format_usd(pos.size * pos.cur_price);
-        lines.push(format!(
-            "• {} — size: {size}, avg: {avg}, cur: {cur}, purchased: {purchased_value}, value: {current_value}, pnl: {pnl}",
-            html_escape(&pos.outcome),
-        ));
+        if condition_id.is_some() {
+            lines.push(format!(
+                "• {} — size: {size}, avg: {avg}, cur: {cur}, purchased: {purchased_value}, value: {current_value}, pnl: {pnl}",
+                html_escape(&pos.outcome),
+            ));
+        } else {
+            lines.push(format!(
+                "• {} / {} — size: {size}, avg: {avg}, cur: {cur}, purchased: {purchased_value}, value: {current_value}, pnl: {pnl}",
+                html_escape(&pos.title),
+                html_escape(&pos.outcome),
+            ));
+        }
     }
 
     bot.send_message(chat_id, lines.join("\n"))
@@ -1914,6 +1946,16 @@ async fn handle_show_positions(
         .await?;
 
     Ok(())
+}
+
+fn extract_wallet_address_from_text(text: &str) -> Option<String> {
+    text.split(|c: char| !(c.is_ascii_hexdigit() || c == 'x' || c == 'X'))
+        .find(|part| {
+            part.len() == 42
+                && (part.starts_with("0x") || part.starts_with("0X"))
+                && part[2..].chars().all(|c| c.is_ascii_hexdigit())
+        })
+        .map(|part| part.to_ascii_lowercase())
 }
 
 fn format_copy_trade_preview(state: &db::CopyTradeState) -> String {
