@@ -5,7 +5,7 @@ use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::Client as DataClient;
-use polymarket_client_sdk::types::{Address, B256, Decimal, U256};
+use polymarket_client_sdk::types::{Address, Decimal, B256, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
@@ -42,8 +42,11 @@ pub async fn handle_message(
     encryption_key: Option<EncryptionKey>,
 ) -> ResponseResult<()> {
     if !msg.chat.is_private() {
-        bot.send_message(msg.chat.id, "For security, this bot only works in private chats.")
-            .await?;
+        bot.send_message(
+            msg.chat.id,
+            "For security, this bot only works in private chats.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -53,7 +56,8 @@ pub async fn handle_message(
     };
 
     let Some(user) = msg.from.as_ref() else {
-        bot.send_message(msg.chat.id, "This bot only supports direct messages.").await?;
+        bot.send_message(msg.chat.id, "This bot only supports direct messages.")
+            .await?;
         return Ok(());
     };
 
@@ -62,8 +66,11 @@ pub async fn handle_message(
     let user_id = match db::ensure_user(&db, telegram_id, chat_id).await {
         Ok(user_id) => user_id,
         Err(_err) => {
-            bot.send_message(msg.chat.id, "Sorry, I couldn't update your profile. Try again soon.")
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                "Sorry, I couldn't update your profile. Try again soon.",
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -89,12 +96,14 @@ pub async fn handle_message(
         }
         Ok((None, _)) => {}
         Err(_err) => {
-            bot.send_message(msg.chat.id, "Sorry, I couldn't read your session state.").await?;
+            bot.send_message(msg.chat.id, "Sorry, I couldn't read your session state.")
+                .await?;
             return Ok(());
         }
     }
 
-    bot.send_message(msg.chat.id, "Use /start to open the menu.").await?;
+    bot.send_message(msg.chat.id, "Use /start to open the menu.")
+        .await?;
     Ok(())
 }
 
@@ -167,8 +176,9 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:auth_type_eoa" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:0"))
-                .await;
+            let _ =
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:0"))
+                    .await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -179,8 +189,9 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:auth_type_proxy" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:1"))
-                .await;
+            let _ =
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:1"))
+                    .await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -211,8 +222,8 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         "manage:market_order" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_MARKET_ORDER), None)
-                .await;
+            let _ =
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_MARKET_ORDER), None).await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -222,8 +233,8 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:limit_order" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_LIMIT_ORDER), None)
-                .await;
+            let _ =
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_LIMIT_ORDER), None).await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -233,8 +244,8 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:cancel_order" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_CANCEL_ORDER), None)
-                .await;
+            let _ =
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_CANCEL_ORDER), None).await;
             send_callback_menu(
                 &bot,
                 &query,
@@ -432,7 +443,15 @@ pub async fn handle_callback(
                 .unwrap_or(ChatId(query.from.id.0 as i64));
             if let Some(id_str) = data.strip_prefix("ct_confirm:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_confirm(&bot, chat_id, &db, user_id, ct_id, encryption_key.clone()).await?;
+                    handle_copy_trade_confirm(
+                        &bot,
+                        chat_id,
+                        &db,
+                        user_id,
+                        ct_id,
+                        encryption_key.clone(),
+                    )
+                    .await?;
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -493,7 +512,8 @@ pub async fn handle_callback(
                         .as_ref()
                         .map(|message| message.chat().id)
                         .unwrap_or(ChatId(query.from.id.0 as i64));
-                    bot.send_message(chat_id, "Send the new price (e.g., 0.47):").await?;
+                    bot.send_message(chat_id, "Send the new price (e.g., 0.47):")
+                        .await?;
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -513,7 +533,8 @@ pub async fn handle_callback(
                         .as_ref()
                         .map(|message| message.chat().id)
                         .unwrap_or(ChatId(query.from.id.0 as i64));
-                    bot.send_message(chat_id, "Send the new size (number of shares):").await?;
+                    bot.send_message(chat_id, "Send the new size (number of shares):")
+                        .await?;
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -541,9 +562,12 @@ async fn handle_top_level_command(
         }
         "manage" => {
             let _ = db::set_mode(db, user_id, "manage").await;
-            bot.send_message(msg.chat.id, "Manage your trading wallet, orders, and positions.")
-                .reply_markup(manage_menu_markup())
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                "Manage your trading wallet, orders, and positions.",
+            )
+            .reply_markup(manage_menu_markup())
+            .await?;
         }
         _ => {
             bot.send_message(msg.chat.id, "Unknown command. Use /start for the menu.")
@@ -579,8 +603,11 @@ async fn handle_pending_action(
     match action {
         ACTION_TRACK_ADD_ADDRESS => {
             if !is_valid_wallet_address(input) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid. Expected 0x + 40 hex characters.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "That wallet address looks invalid. Expected 0x + 40 hex characters.",
+                )
+                .await?;
                 return Ok(());
             }
 
@@ -593,8 +620,11 @@ async fn handle_pending_action(
             )
             .await
             {
-                bot.send_message(msg.chat.id, "Sorry, I couldn't continue that request. Try again soon.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "Sorry, I couldn't continue that request. Try again soon.",
+                )
+                .await?;
                 return Ok(());
             }
             bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
@@ -604,8 +634,11 @@ async fn handle_pending_action(
         ACTION_TRACK_ADD_LABEL => {
             let Some(wallet_address) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "That action expired. Use /start to open the menu.",
+                )
+                .await?;
                 return Ok(());
             };
 
@@ -617,13 +650,15 @@ async fn handle_pending_action(
                 return Ok(());
             }
 
-            finalize_track_add(&bot, msg.chat.id, db, user_id, wallet_address, Some(label))
-                .await?;
+            finalize_track_add(&bot, msg.chat.id, db, user_id, wallet_address, Some(label)).await?;
         }
         ACTION_TRACK_REMOVE => {
             if !is_valid_wallet_address(input) {
-                bot.send_message(msg.chat.id, "That wallet address looks invalid. Expected 0x + 40 hex characters.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "That wallet address looks invalid. Expected 0x + 40 hex characters.",
+                )
+                .await?;
                 return Ok(());
             }
 
@@ -631,8 +666,11 @@ async fn handle_pending_action(
             let removed = match db::remove_tracked_wallet(db, user_id, &wallet_address).await {
                 Ok(removed) => removed,
                 Err(_err) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't remove that wallet. Try again soon.")
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Sorry, I couldn't remove that wallet. Try again soon.",
+                    )
+                    .await?;
                     return Ok(());
                 }
             };
@@ -681,14 +719,18 @@ async fn handle_pending_action(
 
             let wallet_address = normalize_wallet_address(&signer.address().to_string());
             let aad = crypto::build_aad(user_id, &wallet_address);
-            let (encrypted_key, nonce) = match crypto::encrypt(&encryption_key, private_key.as_bytes(), &aad) {
-                Ok(payload) => payload,
-                Err(_err) => {
-                    bot.send_message(msg.chat.id, "Sorry, I couldn't secure that key. Try again soon.")
+            let (encrypted_key, nonce) =
+                match crypto::encrypt(&encryption_key, private_key.as_bytes(), &aad) {
+                    Ok(payload) => payload,
+                    Err(_err) => {
+                        bot.send_message(
+                            msg.chat.id,
+                            "Sorry, I couldn't secure that key. Try again soon.",
+                        )
                         .await?;
-                    return Ok(());
-                }
-            };
+                        return Ok(());
+                    }
+                };
 
             let had_wallet = matches!(db::get_managed_wallet(db, user_id).await, Ok(Some(_)));
             if let Err(_err) = db::set_managed_wallet(
@@ -702,8 +744,11 @@ async fn handle_pending_action(
             )
             .await
             {
-                bot.send_message(msg.chat.id, "Sorry, I couldn't store that wallet. Try again soon.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "Sorry, I couldn't store that wallet. Try again soon.",
+                )
+                .await?;
                 return Ok(());
             }
 
@@ -721,7 +766,8 @@ async fn handle_pending_action(
             }
 
             if had_wallet {
-                bot.send_message(msg.chat.id, format!("Wallet updated to {wallet_address}.")).await?;
+                bot.send_message(msg.chat.id, format!("Wallet updated to {wallet_address}."))
+                    .await?;
             }
             bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
                 .reply_markup(manage_label_menu_markup())
@@ -730,8 +776,11 @@ async fn handle_pending_action(
         ACTION_MANAGE_AUTH_LABEL => {
             let Some(wallet_address) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "That action expired. Use /start to open the menu.",
+                )
+                .await?;
                 return Ok(());
             };
 
@@ -759,7 +808,7 @@ async fn handle_pending_action(
 
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() != 3 {
-                    bot.send_message(
+                bot.send_message(
                         msg.chat.id,
                         "Market order format: <token_id> <buy|sell> <amount> (buy uses USDC, sell uses shares).",
                     )
@@ -792,13 +841,14 @@ async fn handle_pending_action(
                 }
             };
 
-            let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
-                Ok(payload) => payload,
-                Err(message) => {
-                    bot.send_message(msg.chat.id, message).await?;
-                    return Ok(());
-                }
-            };
+            let (signer, signature_type) =
+                match load_managed_wallet_signer(db, user_id, encryption_key).await {
+                    Ok(payload) => payload,
+                    Err(message) => {
+                        bot.send_message(msg.chat.id, message).await?;
+                        return Ok(());
+                    }
+                };
 
             let client = match ClobClient::default()
                 .authentication_builder(&signer)
@@ -814,8 +864,11 @@ async fn handle_pending_action(
                         let _ = db::clear_pending_state(db, user_id).await;
                         send_manage_menu(&bot, msg.chat.id).await?;
                     } else {
-                        bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            "Sorry, I couldn't authenticate that wallet.",
+                        )
+                        .await?;
                     }
                     return Ok(());
                 }
@@ -872,7 +925,10 @@ async fn handle_pending_action(
             if response.success {
                 bot.send_message(
                     msg.chat.id,
-                    format!("Order submitted. ID: {} Status: {:?}", response.order_id, response.status),
+                    format!(
+                        "Order submitted. ID: {} Status: {:?}",
+                        response.order_id, response.status
+                    ),
                 )
                 .await?;
             } else if let Some(error) = response.error_msg {
@@ -898,11 +954,11 @@ async fn handle_pending_action(
 
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() != 4 {
-                    bot.send_message(
-                        msg.chat.id,
-                        "Limit order format: <token_id> <buy|sell> <price> <size>.",
-                    )
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "Limit order format: <token_id> <buy|sell> <price> <size>.",
+                )
+                .await?;
                 return Ok(());
             }
 
@@ -939,13 +995,14 @@ async fn handle_pending_action(
                 }
             };
 
-            let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
-                Ok(payload) => payload,
-                Err(message) => {
-                    bot.send_message(msg.chat.id, message).await?;
-                    return Ok(());
-                }
-            };
+            let (signer, signature_type) =
+                match load_managed_wallet_signer(db, user_id, encryption_key).await {
+                    Ok(payload) => payload,
+                    Err(message) => {
+                        bot.send_message(msg.chat.id, message).await?;
+                        return Ok(());
+                    }
+                };
 
             let client = match ClobClient::default()
                 .authentication_builder(&signer)
@@ -961,8 +1018,11 @@ async fn handle_pending_action(
                         let _ = db::clear_pending_state(db, user_id).await;
                         send_manage_menu(&bot, msg.chat.id).await?;
                     } else {
-                        bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            "Sorry, I couldn't authenticate that wallet.",
+                        )
+                        .await?;
                     }
                     return Ok(());
                 }
@@ -1006,7 +1066,10 @@ async fn handle_pending_action(
             if response.success {
                 bot.send_message(
                     msg.chat.id,
-                    format!("Order submitted. ID: {} Status: {:?}", response.order_id, response.status),
+                    format!(
+                        "Order submitted. ID: {} Status: {:?}",
+                        response.order_id, response.status
+                    ),
                 )
                 .await?;
             } else if let Some(error) = response.error_msg {
@@ -1039,13 +1102,14 @@ async fn handle_pending_action(
 
             let order_id = parts[0];
 
-            let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
-                Ok(payload) => payload,
-                Err(message) => {
-                    bot.send_message(msg.chat.id, message).await?;
-                    return Ok(());
-                }
-            };
+            let (signer, signature_type) =
+                match load_managed_wallet_signer(db, user_id, encryption_key).await {
+                    Ok(payload) => payload,
+                    Err(message) => {
+                        bot.send_message(msg.chat.id, message).await?;
+                        return Ok(());
+                    }
+                };
 
             let client = match ClobClient::default()
                 .authentication_builder(&signer)
@@ -1057,12 +1121,16 @@ async fn handle_pending_action(
                 Err(err) => {
                     let message = format!("{err}");
                     if is_wallet_type_error(&message) {
-                        send_wallet_type_error(&bot, msg.chat.id, "Cancel failed", &message).await?;
+                        send_wallet_type_error(&bot, msg.chat.id, "Cancel failed", &message)
+                            .await?;
                         let _ = db::clear_pending_state(db, user_id).await;
                         send_manage_menu(&bot, msg.chat.id).await?;
                     } else {
-                        bot.send_message(msg.chat.id, "Sorry, I couldn't authenticate that wallet.")
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            "Sorry, I couldn't authenticate that wallet.",
+                        )
+                        .await?;
                     }
                     return Ok(());
                 }
@@ -1097,23 +1165,30 @@ async fn handle_pending_action(
         ACTION_COPY_TRADE_EDIT_PRICE => {
             let Some(ct_id_str) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "That action expired. Use /start to open the menu.",
+                )
+                .await?;
                 return Ok(());
             };
             let ct_id = match ct_id_str.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = db::clear_pending_state(db, user_id).await;
-                    bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "That action expired. Use /start to open the menu.",
+                    )
+                    .await?;
                     return Ok(());
                 }
             };
             let price = match parse_decimal(input) {
                 Some(_) => input.trim(),
                 None => {
-                    bot.send_message(msg.chat.id, "Price must be a decimal number (e.g., 0.47).").await?;
+                    bot.send_message(msg.chat.id, "Price must be a decimal number (e.g., 0.47).")
+                        .await?;
                     return Ok(());
                 }
             };
@@ -1124,23 +1199,30 @@ async fn handle_pending_action(
         ACTION_COPY_TRADE_EDIT_SIZE => {
             let Some(ct_id_str) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                    .await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "That action expired. Use /start to open the menu.",
+                )
+                .await?;
                 return Ok(());
             };
             let ct_id = match ct_id_str.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = db::clear_pending_state(db, user_id).await;
-                    bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "That action expired. Use /start to open the menu.",
+                    )
+                    .await?;
                     return Ok(());
                 }
             };
             let size = match parse_decimal(input) {
                 Some(_) => input.trim(),
                 None => {
-                    bot.send_message(msg.chat.id, "Size must be a number.").await?;
+                    bot.send_message(msg.chat.id, "Size must be a number.")
+                        .await?;
                     return Ok(());
                 }
             };
@@ -1150,8 +1232,11 @@ async fn handle_pending_action(
         }
         _ => {
             let _ = db::clear_pending_state(db, user_id).await;
-            bot.send_message(msg.chat.id, "That action expired. Use /start to open the menu.")
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                "That action expired. Use /start to open the menu.",
+            )
+            .await?;
         }
     }
 
@@ -1213,7 +1298,10 @@ fn track_menu_markup() -> InlineKeyboardMarkup {
 
 fn label_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback("Skip label", "track:skip_label")],
+        vec![InlineKeyboardButton::callback(
+            "Skip label",
+            "track:skip_label",
+        )],
         vec![InlineKeyboardButton::callback("Cancel", "action:cancel")],
     ])
 }
@@ -1236,15 +1324,24 @@ fn manage_menu_markup() -> InlineKeyboardMarkup {
             InlineKeyboardButton::callback("🎯 Limit order", "manage:limit_order"),
             InlineKeyboardButton::callback("🛑 Cancel order", "manage:cancel_order"),
         ],
-        vec![InlineKeyboardButton::callback("🗑️ Remove wallet", "manage:remove")],
+        vec![InlineKeyboardButton::callback(
+            "🗑️ Remove wallet",
+            "manage:remove",
+        )],
         vec![InlineKeyboardButton::callback("↩️ Back", "menu:main")],
     ])
 }
 
 fn manage_label_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback("Skip label", "manage:skip_label")],
-        vec![InlineKeyboardButton::callback("Cancel", "manage:cancel_action")],
+        vec![InlineKeyboardButton::callback(
+            "Skip label",
+            "manage:skip_label",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Cancel",
+            "manage:cancel_action",
+        )],
     ])
 }
 
@@ -1310,7 +1407,10 @@ fn manage_remove_confirm_markup() -> InlineKeyboardMarkup {
 }
 
 fn cancel_menu_markup() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback("Cancel", "action:cancel")]])
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "Cancel",
+        "action:cancel",
+    )]])
 }
 
 async fn send_callback_menu(
@@ -1351,8 +1451,11 @@ async fn finalize_track_add(
     let inserted = match db::add_tracked_wallet(db, user_id, wallet_address, label).await {
         Ok(inserted) => inserted,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't add that wallet. Try again soon.")
-                .await?;
+            bot.send_message(
+                chat_id,
+                "Sorry, I couldn't add that wallet. Try again soon.",
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -1426,9 +1529,12 @@ async fn send_tracked_wallets(
 }
 
 async fn send_manage_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-    bot.send_message(chat_id, "Manage your trading wallet, orders, and positions.")
-        .reply_markup(manage_menu_markup())
-        .await?;
+    bot.send_message(
+        chat_id,
+        "Manage your trading wallet, orders, and positions.",
+    )
+    .reply_markup(manage_menu_markup())
+    .await?;
     Ok(())
 }
 
@@ -1470,8 +1576,11 @@ async fn send_managed_positions(
         SignatureType::Proxy => match derive_proxy_wallet(signer_address, POLYGON) {
             Some(proxy) => proxy,
             None => {
-                bot.send_message(chat_id, "Proxy wallet derivation is not supported on this chain.")
-                    .await?;
+                bot.send_message(
+                    chat_id,
+                    "Proxy wallet derivation is not supported on this chain.",
+                )
+                .await?;
                 send_manage_menu(bot, chat_id).await?;
                 return Ok(());
             }
@@ -1595,17 +1704,16 @@ async fn set_managed_wallet_type(
         return Ok(());
     };
 
-    let updated = match db::update_managed_wallet_signature_type(db, user_id, signature_type as i64)
-        .await
-    {
-        Ok(updated) => updated,
-        Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't update the wallet type.")
-                .await?;
-            send_manage_menu(bot, chat_id).await?;
-            return Ok(());
-        }
-    };
+    let updated =
+        match db::update_managed_wallet_signature_type(db, user_id, signature_type as i64).await {
+            Ok(updated) => updated,
+            Err(_err) => {
+                bot.send_message(chat_id, "Sorry, I couldn't update the wallet type.")
+                    .await?;
+                send_manage_menu(bot, chat_id).await?;
+                return Ok(());
+            }
+        };
 
     if updated {
         let label = format_signature_type(signature_type);
@@ -1676,8 +1784,11 @@ async fn confirm_managed_wallet_removal(
     let removed = match db::remove_managed_wallet(db, user_id).await {
         Ok(removed) => removed,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't remove that wallet. Try again soon.")
-                .await?;
+            bot.send_message(
+                chat_id,
+                "Sorry, I couldn't remove that wallet. Try again soon.",
+            )
+            .await?;
             send_manage_menu(bot, chat_id).await?;
             return Ok(());
         }
@@ -1796,9 +1907,7 @@ async fn send_wallet_type_error(
 ) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        format!(
-            "{title}: {detail}\nWallet type may be incorrect. Use Change wallet type."
-        ),
+        format!("{title}: {detail}\nWallet type may be incorrect. Use Change wallet type."),
     )
     .reply_markup(manage_wallet_type_prompt_markup())
     .await?;
@@ -1823,6 +1932,26 @@ fn parse_decimal(raw: &str) -> Option<Decimal> {
 
 fn format_decimal(value: Decimal) -> String {
     number_format::format_value(value)
+}
+
+fn format_signed_usd(value: Decimal) -> String {
+    let sign = if value < Decimal::ZERO { "-" } else { "+" };
+    let magnitude = if value < Decimal::ZERO { -value } else { value };
+    format!("{sign}{}", number_format::format_usd(magnitude))
+}
+
+fn format_signed_percent(value: Decimal) -> String {
+    format!("{:+.2}%", value.round_dp(2))
+}
+
+fn format_value_change(pnl: Decimal, cost: Decimal) -> String {
+    let pnl_display = format_signed_usd(pnl);
+    if cost > Decimal::ZERO {
+        let pnl_percent = (pnl / cost) * Decimal::from(100);
+        format!("({pnl_display}, {})", format_signed_percent(pnl_percent))
+    } else {
+        format!("({pnl_display}, N/A)")
+    }
 }
 
 fn html_escape(text: &str) -> String {
@@ -1866,8 +1995,7 @@ async fn handle_show_positions(
     let address = match Address::from_str(&wallet_address) {
         Ok(addr) => addr,
         Err(_) => {
-            bot.send_message(chat_id, "Invalid wallet address.")
-                .await?;
+            bot.send_message(chat_id, "Invalid wallet address.").await?;
             return Ok(());
         }
     };
@@ -1906,8 +2034,7 @@ async fn handle_show_positions(
         } else {
             "No open positions for this wallet."
         };
-        bot.send_message(chat_id, message)
-            .await?;
+        bot.send_message(chat_id, message).await?;
         return Ok(());
     }
 
@@ -1921,27 +2048,25 @@ async fn handle_show_positions(
         )]
     };
     for pos in &matching {
+        let label = if condition_id.is_some() {
+            html_escape(&pos.outcome)
+        } else {
+            format!("{}/{}", html_escape(&pos.title), html_escape(&pos.outcome))
+        };
         let size = format_decimal(pos.size);
         let avg = number_format::format_price_with_odds(pos.avg_price);
         let cur = number_format::format_price_with_odds(pos.cur_price);
-        let pnl = number_format::format_usd(pos.cash_pnl);
-        let purchased_value = number_format::format_usd(pos.size * pos.avg_price);
-        let current_value = number_format::format_usd(pos.size * pos.cur_price);
-        if condition_id.is_some() {
-            lines.push(format!(
-                "• {} — size: {size}, avg: {avg}, cur: {cur}, purchased: {purchased_value}, value: {current_value}, pnl: {pnl}",
-                html_escape(&pos.outcome),
-            ));
-        } else {
-            lines.push(format!(
-                "• {} / {} — size: {size}, avg: {avg}, cur: {cur}, purchased: {purchased_value}, value: {current_value}, pnl: {pnl}",
-                html_escape(&pos.title),
-                html_escape(&pos.outcome),
-            ));
-        }
+        let purchased_value = pos.size * pos.avg_price;
+        let current_value = pos.size * pos.cur_price;
+        let purchased_value_display = number_format::format_usd(purchased_value);
+        let current_value_display = number_format::format_usd(current_value);
+        let value_change = format_value_change(pos.cash_pnl, purchased_value);
+        lines.push(format!(
+            "• <b>{label}</b>\nsize {size} | avg {avg} | cur {cur}\nvalue {current_value_display} {value_change} | cost {purchased_value_display}",
+        ));
     }
 
-    bot.send_message(chat_id, lines.join("\n"))
+    bot.send_message(chat_id, lines.join("\n\n"))
         .parse_mode(ParseMode::Html)
         .await?;
 
@@ -1961,14 +2086,8 @@ fn extract_wallet_address_from_text(text: &str) -> Option<String> {
 fn format_copy_trade_preview(state: &db::CopyTradeState) -> String {
     let side_emoji = if state.side == "Buy" { "🟢" } else { "🔴" };
     let side_label = state.side.to_uppercase();
-    let market = state
-        .market_title
-        .as_deref()
-        .unwrap_or("Unknown market");
-    let outcome = state
-        .outcome
-        .as_deref()
-        .unwrap_or("N/A");
+    let market = state.market_title.as_deref().unwrap_or("Unknown market");
+    let outcome = state.outcome.as_deref().unwrap_or("N/A");
 
     let price_line = if state.order_type == "market" {
         "Price: at market".to_string()
@@ -2091,8 +2210,11 @@ async fn handle_copy_trade_init(
     ) {
         (Some(t), Some(s), Some(p), Some(sz)) => (t, s, p, sz),
         _ => {
-            bot.send_message(chat_id, "This activity does not have enough data to copy trade.")
-                .await?;
+            bot.send_message(
+                chat_id,
+                "This activity does not have enough data to copy trade.",
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -2242,13 +2364,14 @@ async fn handle_copy_trade_confirm(
         }
     };
 
-    let (signer, signature_type) = match load_managed_wallet_signer(db, user_id, encryption_key).await {
-        Ok(payload) => payload,
-        Err(message) => {
-            bot.send_message(chat_id, message).await?;
-            return Ok(());
-        }
-    };
+    let (signer, signature_type) =
+        match load_managed_wallet_signer(db, user_id, encryption_key).await {
+            Ok(payload) => payload,
+            Err(message) => {
+                bot.send_message(chat_id, message).await?;
+                return Ok(());
+            }
+        };
 
     let client = match ClobClient::default()
         .authentication_builder(&signer)
@@ -2286,7 +2409,8 @@ async fn handle_copy_trade_confirm(
         let amount = match amount {
             Ok(amount) => amount,
             Err(_) => {
-                bot.send_message(chat_id, "Invalid amount for this order.").await?;
+                bot.send_message(chat_id, "Invalid amount for this order.")
+                    .await?;
                 return Ok(());
             }
         };
@@ -2301,7 +2425,8 @@ async fn handle_copy_trade_confirm(
         {
             Ok(order) => order,
             Err(_) => {
-                bot.send_message(chat_id, "Could not build market order.").await?;
+                bot.send_message(chat_id, "Could not build market order.")
+                    .await?;
                 return Ok(());
             }
         };
@@ -2342,7 +2467,8 @@ async fn handle_copy_trade_confirm(
         {
             Ok(order) => order,
             Err(_) => {
-                bot.send_message(chat_id, "Could not build limit order.").await?;
+                bot.send_message(chat_id, "Could not build limit order.")
+                    .await?;
                 return Ok(());
             }
         };
@@ -2405,7 +2531,10 @@ mod tests {
     fn parse_signature_type_maps_values() {
         assert_eq!(parse_signature_type(Some("sig:0")), SignatureType::Eoa);
         assert_eq!(parse_signature_type(Some("sig:1")), SignatureType::Proxy);
-        assert_eq!(parse_signature_type(Some("sig:2")), SignatureType::GnosisSafe);
+        assert_eq!(
+            parse_signature_type(Some("sig:2")),
+            SignatureType::GnosisSafe
+        );
     }
 
     #[test]
@@ -2418,9 +2547,18 @@ mod tests {
 
     #[test]
     fn format_signature_type_is_user_friendly() {
-        assert_eq!(format_signature_type(SignatureType::Eoa), "Standard wallet (MetaMask/Ledger)");
-        assert_eq!(format_signature_type(SignatureType::Proxy), "Email/Google login (Magic)");
-        assert_eq!(format_signature_type(SignatureType::GnosisSafe), "Gnosis Safe");
+        assert_eq!(
+            format_signature_type(SignatureType::Eoa),
+            "Standard wallet (MetaMask/Ledger)"
+        );
+        assert_eq!(
+            format_signature_type(SignatureType::Proxy),
+            "Email/Google login (Magic)"
+        );
+        assert_eq!(
+            format_signature_type(SignatureType::GnosisSafe),
+            "Gnosis Safe"
+        );
     }
 
     #[test]
@@ -2558,5 +2696,30 @@ mod tests {
         assert!(data.contains(&"ct_market:99".to_string()));
         assert!(data.contains(&"ct_price:99".to_string()));
         assert!(data.contains(&"ct_size:99".to_string()));
+    }
+
+    #[test]
+    fn format_signed_usd_includes_sign() {
+        assert_eq!(
+            format_signed_usd(Decimal::from_str("120.732").unwrap()),
+            "+$120.732"
+        );
+        assert_eq!(
+            format_signed_usd(Decimal::from_str("-72.012").unwrap()),
+            "-$72.012"
+        );
+    }
+
+    #[test]
+    fn format_value_change_includes_percent_with_two_decimals() {
+        let pnl = Decimal::from_str("120.732").unwrap();
+        let cost = Decimal::from_str("917.568").unwrap();
+        assert_eq!(format_value_change(pnl, cost), "(+$120.732, +13.16%)");
+    }
+
+    #[test]
+    fn format_value_change_zero_cost_shows_na_percent() {
+        let pnl = Decimal::from_str("10").unwrap();
+        assert_eq!(format_value_change(pnl, Decimal::ZERO), "(+$10.000, N/A)");
     }
 }
