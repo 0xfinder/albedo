@@ -34,7 +34,7 @@ Personal Telegram bot because the Polymarket UI sucks.
    # Optional - defaults to sqlite://bot.db
    DATABASE_URL=sqlite://bot.db
 
-   # Optional - polling interval in seconds (default: 1)
+   # Optional - polling interval in seconds (default: 1, supports decimals like 0.5; 0 disables polling)
    POLYMARKET_DATA_POLL_SECONDS=1
 
    # Optional - for encrypting managed wallet private keys

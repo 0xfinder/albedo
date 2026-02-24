@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     let _data_handle = monitoring::spawn_data_polling(
         bot.clone(),
         db.clone(),
-        config.data_poll_seconds,
+        config.data_poll_interval,
     );
 
     let _ws_handle = monitoring::spawn_ws_user_events(

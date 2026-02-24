@@ -33,15 +33,15 @@ type MarketCache = Arc<Mutex<HashMap<String, MarketInfo>>>;
 pub fn spawn_data_polling(
     bot: teloxide::prelude::Bot,
     db: Db,
-    poll_seconds: u64,
+    poll_interval: Duration,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    if poll_seconds == 0 {
+    if poll_interval.is_zero() {
         return None;
     }
 
     Some(tokio::spawn(async move {
         let client = DataClient::default();
-        let mut interval = tokio::time::interval(Duration::from_secs(poll_seconds));
+        let mut interval = tokio::time::interval(poll_interval);
 
         loop {
             interval.tick().await;
