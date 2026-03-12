@@ -1960,6 +1960,27 @@ fn html_escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
+fn format_position_message(
+    label: &str,
+    size: Decimal,
+    avg_price: Decimal,
+    cur_price: Decimal,
+    cash_pnl: Decimal,
+) -> String {
+    let size_display = format_decimal(size);
+    let avg_display = number_format::format_price_with_odds(avg_price);
+    let cur_display = number_format::format_price_with_odds(cur_price);
+    let purchased_value = size * avg_price;
+    let current_value = size * cur_price;
+    let purchased_value_display = number_format::format_usd(purchased_value);
+    let current_value_display = number_format::format_usd(current_value);
+    let value_change = format_value_change(cash_pnl, purchased_value);
+
+    format!(
+        "• <b>{label}</b>\n<b>Size:</b> {size_display}\n<b>Price:</b> {avg_display} → {cur_display}\n<b>Value:</b> {purchased_value_display} → {current_value_display} {value_change}"
+    )
+}
+
 async fn handle_show_positions(
     bot: &Bot,
     chat_id: ChatId,
@@ -2053,16 +2074,12 @@ async fn handle_show_positions(
         } else {
             format!("{}/{}", html_escape(&pos.title), html_escape(&pos.outcome))
         };
-        let size = format_decimal(pos.size);
-        let avg = number_format::format_price_with_odds(pos.avg_price);
-        let cur = number_format::format_price_with_odds(pos.cur_price);
-        let purchased_value = pos.size * pos.avg_price;
-        let current_value = pos.size * pos.cur_price;
-        let purchased_value_display = number_format::format_usd(purchased_value);
-        let current_value_display = number_format::format_usd(current_value);
-        let value_change = format_value_change(pos.cash_pnl, purchased_value);
-        lines.push(format!(
-            "• <b>{label}</b>\nsize {size} | avg {avg} | cur {cur}\nvalue {current_value_display} {value_change} | cost {purchased_value_display}",
+        lines.push(format_position_message(
+            &label,
+            pos.size,
+            pos.avg_price,
+            pos.cur_price,
+            pos.cash_pnl,
         ));
     }
 
@@ -2721,5 +2738,21 @@ mod tests {
     fn format_value_change_zero_cost_shows_na_percent() {
         let pnl = Decimal::from_str("10").unwrap();
         assert_eq!(format_value_change(pnl, Decimal::ZERO), "(+$10.000, N/A)");
+    }
+
+    #[test]
+    fn format_position_message_uses_multiline_layout() {
+        let formatted = format_position_message(
+            "YES",
+            Decimal::from_str("75.758").unwrap(),
+            Decimal::from_str("0.660").unwrap(),
+            Decimal::from_str("0.855").unwrap(),
+            Decimal::from_str("14.773").unwrap(),
+        );
+
+        assert_eq!(
+            formatted,
+            "• <b>YES</b>\n<b>Size:</b> 75.758\n<b>Price:</b> $0.660 (1.52) → $0.855 (1.17)\n<b>Value:</b> $50.000 → $64.773 (+$14.773, +29.55%)"
+        );
     }
 }
