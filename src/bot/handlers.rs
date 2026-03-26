@@ -4,6 +4,7 @@ use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
+use polymarket_client_sdk::data::types::response::Position;
 use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal, B256, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
@@ -1981,6 +1982,87 @@ fn format_position_message(
     )
 }
 
+#[derive(Clone)]
+struct OutcomeExposure {
+    outcome: String,
+    size: Decimal,
+    cost: Decimal,
+}
+
+fn format_directional_summary(
+    long_outcome: &str,
+    long_size: Decimal,
+    long_avg_price: Decimal,
+    short_outcome: &str,
+    short_size: Decimal,
+    short_avg_price: Decimal,
+) -> String {
+    let hedged_size = long_size.min(short_size);
+    let net_size = long_size - short_size;
+    let hedge_carry = hedged_size * (Decimal::ONE - long_avg_price - short_avg_price);
+    let if_long_wins = hedge_carry + net_size * (Decimal::ONE - long_avg_price);
+    let if_short_wins = hedge_carry - net_size * long_avg_price;
+
+    format!(
+        "<b>Directional Summary</b>\n<b>Direction:</b> {long_outcome} +{}\n<b>Hedged:</b> {}\n<b>Hedge Carry:</b> {}\n<b>If {long_outcome} wins:</b> {}\n<b>If {short_outcome} wins:</b> {}",
+        format_decimal(net_size),
+        format_decimal(hedged_size),
+        format_signed_usd(hedge_carry),
+        format_signed_usd(if_long_wins),
+        format_signed_usd(if_short_wins),
+    )
+}
+
+fn build_directional_summary(positions: &[&Position]) -> Option<String> {
+    let mut exposures: Vec<OutcomeExposure> = Vec::new();
+
+    for pos in positions {
+        let cost = pos.size * pos.avg_price;
+        if let Some(existing) = exposures.iter_mut().find(|entry| entry.outcome == pos.outcome) {
+            existing.size += pos.size;
+            existing.cost += cost;
+        } else {
+            exposures.push(OutcomeExposure {
+                outcome: pos.outcome.clone(),
+                size: pos.size,
+                cost,
+            });
+        }
+    }
+
+    if exposures.len() != 2 {
+        return None;
+    }
+
+    let first = exposures.remove(0);
+    let second = exposures.remove(0);
+    let (larger, smaller) = if first.size >= second.size {
+        (first, second)
+    } else {
+        (second, first)
+    };
+
+    let larger_avg_price = if larger.size > Decimal::ZERO {
+        larger.cost / larger.size
+    } else {
+        Decimal::ZERO
+    };
+    let smaller_avg_price = if smaller.size > Decimal::ZERO {
+        smaller.cost / smaller.size
+    } else {
+        Decimal::ZERO
+    };
+
+    Some(format_directional_summary(
+        &html_escape(&larger.outcome),
+        larger.size,
+        larger_avg_price,
+        &html_escape(&smaller.outcome),
+        smaller.size,
+        smaller_avg_price,
+    ))
+}
+
 async fn handle_show_positions(
     bot: &Bot,
     chat_id: ChatId,
@@ -2081,6 +2163,12 @@ async fn handle_show_positions(
             pos.cur_price,
             pos.cash_pnl,
         ));
+    }
+
+    if condition_id.is_some() {
+        if let Some(summary) = build_directional_summary(&matching) {
+            lines.push(summary);
+        }
     }
 
     bot.send_message(chat_id, lines.join("\n\n"))
@@ -2754,5 +2842,28 @@ mod tests {
             formatted,
             "• <b>YES</b>\n<b>Size:</b> 75.758\n<b>Price:</b> $0.660 (1.52) → $0.855 (1.17)\n<b>Value:</b> $50.000 → $64.773 (+$14.773, +29.55%)"
         );
+    }
+
+    #[test]
+    fn format_directional_summary_handles_hedged_market_with_net_side() {
+        let formatted = format_directional_summary(
+            "Natus Vincere",
+            Decimal::from_str("4996.590").unwrap(),
+            Decimal::from_str("0.398").unwrap(),
+            "BetBoom Team",
+            Decimal::from_str("4634.810").unwrap(),
+            Decimal::from_str("0.607").unwrap(),
+        );
+
+        assert_eq!(
+            formatted,
+            "<b>Directional Summary</b>\n<b>Direction:</b> Natus Vincere +361.780\n<b>Hedged:</b> 4634.810\n<b>Hedge Carry:</b> -$23.174\n<b>If Natus Vincere wins:</b> +$194.618\n<b>If BetBoom Team wins:</b> -$167.162"
+        );
+    }
+
+    #[test]
+    fn build_directional_summary_requires_two_distinct_outcomes() {
+        let positions: Vec<&Position> = Vec::new();
+        assert!(build_directional_summary(&positions).is_none());
     }
 }
