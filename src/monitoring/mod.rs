@@ -449,16 +449,6 @@ async fn poll_activity(
         new_events.push(activity);
     }
 
-    if let Some(hash) = latest_hash.as_deref() {
-        let _ = db::update_tracked_wallet_activity_hash(
-            db,
-            wallet.user_id,
-            &wallet.wallet_address,
-            Some(hash),
-        )
-        .await;
-    }
-
     if new_events.is_empty() {
         return Ok(());
     }
@@ -466,25 +456,25 @@ async fn poll_activity(
     for activity in new_events.into_iter().rev() {
         let notification = ActivityNotification::from_activity(activity);
         let details = serde_json::to_string(&notification).ok();
-        let inserted = match db::insert_activity_log(
+
+        match db::activity_log_exists(
             db,
             wallet.user_id,
             &wallet.wallet_address,
-            &notification.activity_type,
-            notification.market_slug.as_deref(),
             &notification.tx_hash,
             notification.timestamp,
-            details.as_deref(),
-            true,
         )
         .await
         {
-            Ok(inserted) => inserted,
-            Err(_) => false,
-        };
-
-        if !inserted {
-            continue;
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(err) => {
+                eprintln!(
+                    "activity poll: dedupe check failed for tx {}: {err}",
+                    notification.tx_hash
+                );
+                return Ok(());
+            }
         }
 
         let message = format_activity_message(
@@ -539,7 +529,65 @@ async fn poll_activity(
                 request = request.reply_markup(markup);
             }
         }
-        let _ = request.await;
+
+        // Retry transient Telegram failures; on persistent failure stop and
+        // leave the cursor at the last delivered event so the next poll resumes
+        // here instead of skipping the rest of the batch.
+        let mut sent = false;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
+            }
+            match request.clone().await {
+                Ok(_) => {
+                    sent = true;
+                    break;
+                }
+                Err(err) => {
+                    eprintln!(
+                        "activity poll: send failed (attempt {} of 3) for tx {}: {err}",
+                        attempt + 1,
+                        notification.tx_hash
+                    );
+                }
+            }
+        }
+        if !sent {
+            return Ok(());
+        }
+
+        if let Err(err) = db::insert_activity_log(
+            db,
+            wallet.user_id,
+            &wallet.wallet_address,
+            &notification.activity_type,
+            notification.market_slug.as_deref(),
+            &notification.tx_hash,
+            notification.timestamp,
+            details.as_deref(),
+            true,
+        )
+        .await
+        {
+            eprintln!(
+                "activity poll: failed to record tx {}: {err}",
+                notification.tx_hash
+            );
+        }
+
+        if let Err(err) = db::update_tracked_wallet_activity_hash(
+            db,
+            wallet.user_id,
+            &wallet.wallet_address,
+            Some(&activity.transaction_hash.to_string()),
+        )
+        .await
+        {
+            eprintln!(
+                "activity poll: failed to advance cursor after tx {}: {err}",
+                notification.tx_hash
+            );
+        }
     }
 
     Ok(())

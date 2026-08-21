@@ -741,6 +741,27 @@ mod tests {
     }
 }
 
+pub async fn activity_log_exists(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    transaction_hash: &str,
+    activity_timestamp: i64,
+) -> Result<bool> {
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM activity_log \
+         WHERE user_id = ? AND wallet_address = ? AND transaction_hash = ? AND activity_timestamp = ?",
+    )
+    .bind(user_id)
+    .bind(wallet_address)
+    .bind(transaction_hash)
+    .bind(activity_timestamp)
+    .fetch_one(db)
+    .await?;
+
+    Ok(count > 0)
+}
+
 pub async fn insert_activity_log(
     db: &Db,
     user_id: i64,
