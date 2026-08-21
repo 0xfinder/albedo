@@ -559,7 +559,7 @@ async fn handle_top_level_command(
         "start" => handle_start(bot, msg).await?,
         "help" => handle_help(bot, msg).await?,
         "version" => {
-            bot.send_message(msg.chat.id, format!("albedo v{}", crate::VERSION))
+            bot.send_message(msg.chat.id, format!("albedo {}", crate::VERSION))
                 .await?;
         }
         "track" => {

@@ -14,7 +14,7 @@ pub const VERSION: &str = env!("GIT_VERSION");
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    println!("albedo v{VERSION}");
+    println!("albedo {VERSION}");
     
     // Initialize configuration
     let config = config::Config::from_env()?;
