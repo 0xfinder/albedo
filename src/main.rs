@@ -9,9 +9,12 @@ mod utils;
 use color_eyre::eyre::Result;
 use teloxide::prelude::*;
 
+pub const VERSION: &str = env!("GIT_VERSION");
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+    println!("albedo v{VERSION}");
     
     // Initialize configuration
     let config = config::Config::from_env()?;

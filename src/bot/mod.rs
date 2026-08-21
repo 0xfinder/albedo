@@ -35,5 +35,6 @@ fn bot_commands() -> Vec<BotCommand> {
         BotCommand::new("help", "Show help"),
         BotCommand::new("track", "Open the track menu"),
         BotCommand::new("manage", "Open the manage menu"),
+        BotCommand::new("version", "Show the bot version"),
     ]
 }

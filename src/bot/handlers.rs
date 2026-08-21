@@ -21,7 +21,8 @@ const HELP_TEXT: &str = "Available commands:\n\
 /start - Start the bot\n\
 /help - Show this help message\n\
 /track - Open the track menu\n\
-/manage - Open the manage menu";
+/manage - Open the manage menu\n\
+/version - Show the bot version";
 
 const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
 const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
@@ -557,6 +558,10 @@ async fn handle_top_level_command(
     match command {
         "start" => handle_start(bot, msg).await?,
         "help" => handle_help(bot, msg).await?,
+        "version" => {
+            bot.send_message(msg.chat.id, format!("albedo v{}", crate::VERSION))
+                .await?;
+        }
         "track" => {
             let _ = db::set_mode(db, user_id, "track").await;
             send_track_menu(&bot, msg.chat.id).await?;
@@ -1274,7 +1279,7 @@ fn parse_incoming_command(text: &str, bot_name: &str) -> Option<(String, Vec<Str
     let args: Vec<String> = parts.map(str::to_string).collect();
 
     match command.as_str() {
-        "start" | "help" | "track" | "manage" => Some((command, args)),
+        "start" | "help" | "track" | "manage" | "version" => Some((command, args)),
         _ => None,
     }
 }
