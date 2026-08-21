@@ -1,10 +1,12 @@
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::types::response::Position;
+use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::types::{Address, Decimal, B256, U256};
 use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
@@ -23,6 +25,13 @@ const HELP_TEXT: &str = "Available commands:\n\
 /track - Open the track menu\n\
 /manage - Open the manage menu\n\
 /version - Show the bot version";
+
+// Reuse one HTTP client (and its connection pool) across all requests instead
+// of paying a fresh TLS handshake per call.
+fn data_client() -> &'static DataClient {
+    static CLIENT: OnceLock<DataClient> = OnceLock::new();
+    CLIENT.get_or_init(DataClient::default)
+}
 
 const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
 const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
@@ -417,12 +426,12 @@ pub async fn handle_callback(
                 .map(|message| message.chat().id)
                 .unwrap_or(ChatId(query.from.id.0 as i64));
             if let Some(id_str) = data.strip_prefix("sp:") {
+                bot.answer_callback_query(query.id).await?;
                 if let Ok(cb_id) = id_str.parse::<i64>() {
                     handle_show_positions(&bot, chat_id, &db, cb_id, query.message.as_ref())
                         .await?;
                 }
             }
-            bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct:") => {
             let chat_id = query
@@ -1594,7 +1603,7 @@ async fn send_managed_positions(
         _ => signer_address,
     };
 
-    let client = DataClient::default();
+    let client = data_client();
     let builder = match PositionsRequest::builder().user(address).limit(200) {
         Ok(builder) => builder,
         Err(_) => {
@@ -2108,16 +2117,34 @@ async fn handle_show_positions(
         }
     };
 
-    let client = DataClient::default();
-    let builder = match PositionsRequest::builder().user(address).limit(200) {
-        Ok(builder) => builder,
-        Err(_) => {
-            bot.send_message(chat_id, "Could not build positions request.")
-                .await?;
-            return Ok(());
+    let client = data_client();
+    let request = match condition_id {
+        Some(condition_id) => {
+            let builder = PositionsRequest::builder()
+                .user(address)
+                .filter(MarketFilter::markets([condition_id]))
+                .limit(200);
+            match builder {
+                Ok(builder) => builder.build(),
+                Err(_) => {
+                    bot.send_message(chat_id, "Could not build positions request.")
+                        .await?;
+                    return Ok(());
+                }
+            }
+        }
+        None => {
+            let builder = PositionsRequest::builder().user(address).limit(200);
+            match builder {
+                Ok(builder) => builder.build(),
+                Err(_) => {
+                    bot.send_message(chat_id, "Could not build positions request.")
+                        .await?;
+                    return Ok(());
+                }
+            }
         }
     };
-    let request = builder.build();
 
     let positions = match client.positions(&request).await {
         Ok(positions) => positions,
