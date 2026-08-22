@@ -12,7 +12,7 @@ Activity notifications for tradeable events (Buy, Sell, Trade) that include an a
 [📊 Show Positions] [📋 Copy Trade]
 ```
 
-Non-tradeable activity types (Redeem, Claim, Reward, Merge, Split, Conversion, Yield, MakerRebate) only show "Show Positions."
+Non-tradeable activity types (Reward, Merge, Split, Conversion, Yield, MakerRebate) only show "Show Positions." Closed activities (Redeem, Claim) show no buttons at all, since the market is already resolved and there are no positions left to display.
 
 ## Flow
 

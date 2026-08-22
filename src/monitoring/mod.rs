@@ -1,13 +1,15 @@
 use futures::{Stream, StreamExt};
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
-use polymarket_client_sdk::clob::Client as ClobClient;
-use polymarket_client_sdk::clob::ws::Client as WsClient;
 use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
-use polymarket_client_sdk::data::types::request::{ActivityRequest, PositionsRequest, TradesRequest};
+use polymarket_client_sdk::clob::ws::Client as WsClient;
+use polymarket_client_sdk::clob::Client as ClobClient;
+use polymarket_client_sdk::data::types::request::{
+    ActivityRequest, PositionsRequest, TradesRequest,
+};
 use polymarket_client_sdk::data::types::response::Activity;
 use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::Client as DataClient;
-use polymarket_client_sdk::types::{Address, B256, Decimal};
+use polymarket_client_sdk::types::{Address, Decimal, B256};
 use polymarket_client_sdk::POLYGON;
 use serde::Serialize;
 use std::collections::{hash_map::DefaultHasher, HashMap};
@@ -115,10 +117,12 @@ where
     while let Some(event) = stream.next().await {
         match event {
             Ok(_) => ok_count += 1,
-            Err(_) => return StreamOutcome {
-                ok_count,
-                exit: StreamExit::Error,
-            },
+            Err(_) => {
+                return StreamOutcome {
+                    ok_count,
+                    exit: StreamExit::Error,
+                }
+            }
         }
     }
 
@@ -128,7 +132,10 @@ where
     }
 }
 
-async fn consume_user_event_stream_with_handler<S, F, Fut, E>(mut stream: S, mut handler: F) -> StreamOutcome
+async fn consume_user_event_stream_with_handler<S, F, Fut, E>(
+    mut stream: S,
+    mut handler: F,
+) -> StreamOutcome
 where
     S: Stream<Item = Result<WsMessage, E>> + Unpin,
     F: FnMut(WsMessage) -> Fut,
@@ -171,7 +178,10 @@ where
         }
 
         tokio::time::sleep(backoff).await;
-        backoff = std::cmp::min(backoff.saturating_mul(2), Duration::from_millis(WS_BACKOFF_MAX_MS));
+        backoff = std::cmp::min(
+            backoff.saturating_mul(2),
+            Duration::from_millis(WS_BACKOFF_MAX_MS),
+        );
     }
 }
 
@@ -181,7 +191,8 @@ async fn connect_user_events(
     bot: teloxide::prelude::Bot,
     encryption_key: EncryptionKey,
 ) -> color_eyre::eyre::Result<()> {
-    run_ws_with_backoff(|| connect_user_events_once(&wallet, &db, &bot, encryption_key.clone())).await
+    run_ws_with_backoff(|| connect_user_events_once(&wallet, &db, &bot, encryption_key.clone()))
+        .await
 }
 
 async fn connect_user_events_once(
@@ -492,41 +503,47 @@ async fn poll_activity(
                 prefer_large_media: false,
                 show_above_text: false,
             });
-        if let Some(condition_id) = &notification.condition_id {
-            let (trade_token, trade_side, trade_price, trade_size) =
-                if is_tradeable_activity(&notification.activity_type) {
-                    (
-                        notification.asset.as_deref(),
-                        notification.side.as_deref(),
-                        notification.price.as_deref(),
-                        Some(notification.size.as_str()),
-                    )
-                } else {
-                    (None, None, None, None)
-                };
-            if let Ok(cb_id) = db::insert_callback_data(
-                db,
-                &wallet.wallet_address,
-                condition_id,
-                trade_token,
-                trade_side,
-                trade_price,
-                trade_size,
-                Some(notification.market.as_str()),
-                notification.outcome.as_deref(),
-            )
-            .await
-            {
-                let mut buttons = vec![
-                    InlineKeyboardButton::callback("📊 Show Positions", format!("sp:{cb_id}")),
-                ];
-                if trade_token.is_some() {
-                    buttons.push(
-                        InlineKeyboardButton::callback("📋 Copy Trade", format!("ct:{cb_id}")),
-                    );
+        // Closed markets (Redeem/Claim) have no positions left to show,
+        // so skip the button row entirely.
+        if !is_closed_activity(&notification.activity_type) {
+            if let Some(condition_id) = &notification.condition_id {
+                let (trade_token, trade_side, trade_price, trade_size) =
+                    if is_tradeable_activity(&notification.activity_type) {
+                        (
+                            notification.asset.as_deref(),
+                            notification.side.as_deref(),
+                            notification.price.as_deref(),
+                            Some(notification.size.as_str()),
+                        )
+                    } else {
+                        (None, None, None, None)
+                    };
+                if let Ok(cb_id) = db::insert_callback_data(
+                    db,
+                    &wallet.wallet_address,
+                    condition_id,
+                    trade_token,
+                    trade_side,
+                    trade_price,
+                    trade_size,
+                    Some(notification.market.as_str()),
+                    notification.outcome.as_deref(),
+                )
+                .await
+                {
+                    let mut buttons = vec![InlineKeyboardButton::callback(
+                        "📊 Show Positions",
+                        format!("sp:{cb_id}"),
+                    )];
+                    if trade_token.is_some() {
+                        buttons.push(InlineKeyboardButton::callback(
+                            "📋 Copy Trade",
+                            format!("ct:{cb_id}"),
+                        ));
+                    }
+                    let markup = InlineKeyboardMarkup::new(vec![buttons]);
+                    request = request.reply_markup(markup);
                 }
-                let markup = InlineKeyboardMarkup::new(vec![buttons]);
-                request = request.reply_markup(markup);
             }
         }
 
@@ -600,7 +617,10 @@ async fn poll_positions(
     wallet: &db::TrackedWalletWithUser,
     address: Address,
 ) -> color_eyre::eyre::Result<()> {
-    let request = PositionsRequest::builder().user(address).limit(200)?.build();
+    let request = PositionsRequest::builder()
+        .user(address)
+        .limit(200)?
+        .build();
     let positions = match client.positions(&request).await {
         Ok(positions) => positions,
         Err(_) => return Ok(()),
@@ -635,10 +655,7 @@ fn hash_positions(positions: &[polymarket_client_sdk::data::types::response::Pos
         .map(|position| {
             format!(
                 "{}:{}:{}:{}",
-                position.condition_id,
-                position.outcome_index,
-                position.size,
-                position.avg_price
+                position.condition_id, position.outcome_index, position.size, position.avg_price
             )
         })
         .collect();
@@ -657,6 +674,10 @@ fn format_decimal(value: Decimal) -> String {
 
 fn is_tradeable_activity(activity_type: &str) -> bool {
     matches!(activity_type, "Buy" | "Sell" | "Trade")
+}
+
+fn is_closed_activity(activity_type: &str) -> bool {
+    matches!(activity_type, "Redeem" | "Claim")
 }
 
 #[derive(Debug, Serialize)]
@@ -689,10 +710,7 @@ impl ActivityNotification {
             .clone()
             .or_else(|| activity.slug.clone())
             .unwrap_or_else(|| "Unknown market".to_string());
-        let username = activity
-            .name
-            .clone()
-            .or_else(|| activity.pseudonym.clone());
+        let username = activity.name.clone().or_else(|| activity.pseudonym.clone());
         Self {
             activity_type: format!("{:?}", activity.activity_type),
             market,
@@ -794,10 +812,7 @@ async fn handle_ws_message(
         WsMessage::Trade(trade) => {
             let market_label = resolve_market_label(data_client, market_cache, trade.market).await;
             let mut should_send = true;
-            let timestamp = trade
-                .timestamp
-                .or(trade.matchtime)
-                .or(trade.last_update);
+            let timestamp = trade.timestamp.or(trade.matchtime).or(trade.last_update);
             let tx_hash = trade.transaction_hash.map(|hash| hash.to_string());
             if let (Some(tx_hash), Some(timestamp)) = (tx_hash.as_deref(), timestamp) {
                 match db::insert_activity_log(
@@ -838,11 +853,7 @@ async fn handle_ws_message(
     }
 }
 
-async fn resolve_market_label(
-    client: &DataClient,
-    cache: &MarketCache,
-    market: B256,
-) -> String {
+async fn resolve_market_label(client: &DataClient, cache: &MarketCache, market: B256) -> String {
     if let Some(info) = lookup_market_info(client, cache, market).await {
         return format_market_label(&info);
     }
