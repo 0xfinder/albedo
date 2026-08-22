@@ -21,9 +21,7 @@ pub fn format_value(value: Decimal) -> String {
 }
 
 pub fn format_option_value(value: Option<Decimal>) -> String {
-    value
-        .map(format_value)
-        .unwrap_or_else(|| "N/A".to_string())
+    value.map(format_value).unwrap_or_else(|| "N/A".to_string())
 }
 
 pub fn format_usd(value: Decimal) -> String {
@@ -50,7 +48,9 @@ pub fn format_price_with_odds(price: Decimal) -> String {
 }
 
 pub fn format_price_with_odds_str(raw: &str) -> Option<String> {
-    Decimal::from_str(raw.trim()).ok().map(format_price_with_odds)
+    Decimal::from_str(raw.trim())
+        .ok()
+        .map(format_price_with_odds)
 }
 
 #[cfg(test)]

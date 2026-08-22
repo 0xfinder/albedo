@@ -2032,7 +2032,10 @@ fn build_directional_summary(positions: &[&Position]) -> Option<String> {
 
     for pos in positions {
         let cost = pos.size * pos.avg_price;
-        if let Some(existing) = exposures.iter_mut().find(|entry| entry.outcome == pos.outcome) {
+        if let Some(existing) = exposures
+            .iter_mut()
+            .find(|entry| entry.outcome == pos.outcome)
+        {
             existing.size += pos.size;
             existing.cost += cost;
         } else {

@@ -109,10 +109,7 @@ mod tests {
 
     #[test]
     fn parse_data_poll_interval_defaults_to_one_second() {
-        assert_eq!(
-            parse_data_poll_interval(None),
-            Duration::from_secs(1),
-        );
+        assert_eq!(parse_data_poll_interval(None), Duration::from_secs(1),);
     }
 
     #[test]

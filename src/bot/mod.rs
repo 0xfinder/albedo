@@ -2,8 +2,8 @@ pub mod handlers;
 
 use crate::db::Db;
 use crate::utils::crypto::EncryptionKey;
-use teloxide::{dptree, prelude::*};
 use teloxide::types::BotCommand;
+use teloxide::{dptree, prelude::*};
 
 pub async fn start(
     bot: Bot,

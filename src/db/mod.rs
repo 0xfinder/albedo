@@ -57,11 +57,13 @@ pub async fn init(database_url: &str) -> Result<Db> {
     let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
     let pool = SqlitePool::connect_with(options).await?;
 
-    sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
-    
+    sqlx::query("PRAGMA foreign_keys = ON;")
+        .execute(&pool)
+        .await?;
+
     // Run migrations
     sqlx::migrate!("./src/db/migrations").run(&pool).await?;
-    
+
     Ok(pool)
 }
 
@@ -85,10 +87,10 @@ pub async fn ensure_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<i64>
 
 pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
     sqlx::query("UPDATE users SET current_mode = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(mode)
-    .bind(user_id)
-    .execute(db)
-    .await?;
+        .bind(mode)
+        .bind(user_id)
+        .execute(db)
+        .await?;
 
     Ok(())
 }
@@ -179,11 +181,7 @@ pub async fn set_managed_wallet(
     Ok(())
 }
 
-pub async fn update_managed_wallet_label(
-    db: &Db,
-    user_id: i64,
-    label: Option<&str>,
-) -> Result<()> {
+pub async fn update_managed_wallet_label(db: &Db, user_id: i64, label: Option<&str>) -> Result<()> {
     sqlx::query("UPDATE managed_wallets SET label = ? WHERE user_id = ?")
         .bind(label)
         .bind(user_id)
@@ -254,13 +252,12 @@ pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalle
 }
 
 pub async fn remove_tracked_wallet(db: &Db, user_id: i64, wallet_address: &str) -> Result<bool> {
-    let result = sqlx::query(
-        "DELETE FROM tracked_wallets WHERE user_id = ? AND wallet_address = ?",
-    )
-    .bind(user_id)
-    .bind(wallet_address)
-    .execute(db)
-    .await?;
+    let result =
+        sqlx::query("DELETE FROM tracked_wallets WHERE user_id = ? AND wallet_address = ?")
+            .bind(user_id)
+            .bind(wallet_address)
+            .execute(db)
+            .await?;
 
     Ok(result.rows_affected() > 0)
 }
@@ -382,12 +379,7 @@ pub async fn get_copy_trade_state(db: &Db, id: i64) -> Result<Option<CopyTradeSt
     Ok(row)
 }
 
-pub async fn update_copy_trade_field(
-    db: &Db,
-    id: i64,
-    field: &str,
-    value: &str,
-) -> Result<bool> {
+pub async fn update_copy_trade_field(db: &Db, id: i64, field: &str, value: &str) -> Result<bool> {
     let query = match field {
         "side" => "UPDATE copy_trade_state SET side = ? WHERE id = ?",
         "price" => "UPDATE copy_trade_state SET price = ? WHERE id = ?",
@@ -395,11 +387,7 @@ pub async fn update_copy_trade_field(
         "order_type" => "UPDATE copy_trade_state SET order_type = ? WHERE id = ?",
         _ => return Ok(false),
     };
-    let result = sqlx::query(query)
-        .bind(value)
-        .bind(id)
-        .execute(db)
-        .await?;
+    let result = sqlx::query(query).bind(value).bind(id).execute(db).await?;
 
     Ok(result.rows_affected() > 0)
 }
@@ -419,8 +407,8 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     async fn setup_db() -> (Db, i64) {
-        let options = SqliteConnectOptions::from_str("sqlite::memory:")
-            .expect("valid sqlite memory options");
+        let options =
+            SqliteConnectOptions::from_str("sqlite::memory:").expect("valid sqlite memory options");
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)
@@ -509,7 +497,9 @@ mod tests {
             .expect("remove managed wallet");
 
         assert!(removed);
-        let wallet = get_managed_wallet(&db, user_id).await.expect("get managed wallet");
+        let wallet = get_managed_wallet(&db, user_id)
+            .await
+            .expect("get managed wallet");
         assert!(wallet.is_none());
     }
 
@@ -537,9 +527,15 @@ mod tests {
         let (db, _user_id) = setup_db().await;
 
         let id = insert_callback_data(
-            &db, "0xabc", "0xcond",
-            Some("12345"), Some("Buy"), Some("0.47"), Some("100"),
-            Some("Team A vs B"), Some("Team A"),
+            &db,
+            "0xabc",
+            "0xcond",
+            Some("12345"),
+            Some("Buy"),
+            Some("0.47"),
+            Some("100"),
+            Some("Team A vs B"),
+            Some("Team A"),
         )
         .await
         .expect("insert callback_data");
@@ -573,8 +569,15 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit",
-            Some("Team A vs B"), Some("Team A"),
+            &db,
+            user_id,
+            "token123",
+            "Buy",
+            "0.47",
+            "100",
+            "limit",
+            Some("Team A vs B"),
+            Some("Team A"),
         )
         .await
         .expect("insert copy_trade_state");
@@ -719,14 +722,10 @@ mod tests {
         .await
         .expect("insert");
 
-        let deleted = delete_copy_trade_state(&db, id)
-            .await
-            .expect("delete");
+        let deleted = delete_copy_trade_state(&db, id).await.expect("delete");
         assert!(deleted);
 
-        let state = get_copy_trade_state(&db, id)
-            .await
-            .expect("get");
+        let state = get_copy_trade_state(&db, id).await.expect("get");
         assert!(state.is_none());
     }
 
@@ -734,9 +733,7 @@ mod tests {
     async fn copy_trade_state_delete_nonexistent() {
         let (db, _user_id) = setup_db().await;
 
-        let deleted = delete_copy_trade_state(&db, 99999)
-            .await
-            .expect("delete");
+        let deleted = delete_copy_trade_state(&db, 99999).await.expect("delete");
         assert!(!deleted);
     }
 }
