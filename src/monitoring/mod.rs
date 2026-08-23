@@ -362,6 +362,11 @@ mod tests {
         };
         let msg = format_activity_message("0xwallet", None, &notification);
         assert!(msg.contains("🎁 <b>REFERRAL REWARD</b>"));
+        assert!(msg.contains("Value:"));
+        assert!(!msg.contains("Market:"));
+        assert!(!msg.contains("Outcome:"));
+        assert!(!msg.contains("Size:"));
+        assert!(!msg.contains("Price:"));
     }
 
     #[test]
@@ -383,6 +388,11 @@ mod tests {
         };
         let msg = format_activity_message("0xwallet", None, &notification);
         assert!(msg.contains("💰 <b>MAKER REBATE</b>"));
+        assert!(msg.contains("Value:"));
+        assert!(!msg.contains("Market:"));
+        assert!(!msg.contains("Outcome:"));
+        assert!(!msg.contains("Size:"));
+        assert!(!msg.contains("Price:"));
     }
 
     #[test]
@@ -404,6 +414,11 @@ mod tests {
         };
         let msg = format_activity_message("0xwallet", None, &notification);
         assert!(msg.contains("💵 <b>TAKER REBATE</b>"));
+        assert!(msg.contains("Value:"));
+        assert!(!msg.contains("Market:"));
+        assert!(!msg.contains("Outcome:"));
+        assert!(!msg.contains("Size:"));
+        assert!(!msg.contains("Price:"));
     }
 
     #[test]
@@ -697,6 +712,22 @@ fn is_tradeable_activity(activity_type: &str) -> bool {
     matches!(activity_type, "Buy" | "Sell" | "Trade")
 }
 
+// Reward/rebate payouts carry no market context, so their notifications
+// render a compact wallet + value layout instead of the trade fields.
+fn is_reward_activity(activity_type: &str) -> bool {
+    matches!(
+        activity_type,
+        "Unknown(\"REFERRAL_REWARD\")"
+            | "REFERRAL_REWARD"
+            | "Unknown(\"MAKER_REBATE\")"
+            | "MAKER_REBATE"
+            | "MakerRebate"
+            | "Unknown(\"TAKER_REBATE\")"
+            | "TAKER_REBATE"
+            | "TakerRebate"
+    )
+}
+
 fn is_closed_activity(activity_type: &str) -> bool {
     matches!(activity_type, "Redeem" | "Claim")
 }
@@ -755,6 +786,7 @@ fn format_activity_message(
     label: Option<&str>,
     notification: &ActivityNotification,
 ) -> String {
+    let reward = is_reward_activity(&notification.activity_type);
     let (emoji, action) = match notification.activity_type.as_str() {
         "Buy" => ("🟢", "BUY"),
         "Sell" => ("🔴", "SELL"),
@@ -805,6 +837,14 @@ fn format_activity_message(
         .ok()
         .map(number_format::format_usd)
         .unwrap_or_else(|| format!("${}", notification.usdc_size));
+
+    if reward {
+        return format!(
+            "{emoji} <b>{action}</b>\n\n\
+            👛 Wallet: <code>{wallet_address}</code>{name_line}\n\
+            Value: {value}",
+        );
+    }
 
     format!(
         "{emoji} <b>{action}</b>\n\n\
