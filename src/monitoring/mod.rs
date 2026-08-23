@@ -386,6 +386,27 @@ mod tests {
     }
 
     #[test]
+    fn format_activity_message_taker_rebate() {
+        let notification = ActivityNotification {
+            activity_type: "Unknown(\"TAKER_REBATE\")".to_string(),
+            market: "Some Market".to_string(),
+            market_slug: None,
+            outcome: None,
+            side: None,
+            size: "100".to_string(),
+            usdc_size: "100".to_string(),
+            price: None,
+            timestamp: 1700000000,
+            tx_hash: "0xdef456".to_string(),
+            condition_id: None,
+            asset: None,
+            username: None,
+        };
+        let msg = format_activity_message("0xwallet", None, &notification);
+        assert!(msg.contains("💵 <b>TAKER REBATE</b>"));
+    }
+
+    #[test]
     fn is_tradeable_activity_buy() {
         assert!(is_tradeable_activity("Buy"));
     }
@@ -745,6 +766,7 @@ fn format_activity_message(
         "Redeem" | "Claim" => ("🟠", "CLOSED"),
         "Unknown(\"REFERRAL_REWARD\")" | "REFERRAL_REWARD" => ("🎁", "REFERRAL REWARD"),
         "Unknown(\"MAKER_REBATE\")" | "MAKER_REBATE" | "MakerRebate" => ("💰", "MAKER REBATE"),
+        "Unknown(\"TAKER_REBATE\")" | "TAKER_REBATE" | "TakerRebate" => ("💵", "TAKER REBATE"),
         _ => ("📊", notification.activity_type.as_str()),
     };
 
