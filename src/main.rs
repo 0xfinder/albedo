@@ -25,15 +25,27 @@ async fn main() -> Result<()> {
     // Start bot
     let bot = Bot::new(&config.telegram_token);
 
+    if config.allowed_telegram_ids.is_empty() {
+        eprintln!(
+            "WARNING: ALLOWED_TELEGRAM_IDS is empty - the bot is locked down \
+             and no one can interact with it. Add your Telegram user ID in .env."
+        );
+    }
+
     let _data_handle = monitoring::spawn_data_polling(
         bot.clone(),
         db.clone(),
         config.data_poll_interval,
         config.copy_trade_enabled,
+        config.allowed_telegram_ids.clone(),
     );
 
-    let _ws_handle =
-        monitoring::spawn_ws_user_events(bot.clone(), db.clone(), config.encryption_key.clone());
+    let _ws_handle = monitoring::spawn_ws_user_events(
+        bot.clone(),
+        db.clone(),
+        config.encryption_key.clone(),
+        config.allowed_telegram_ids.clone(),
+    );
 
     // Start bot dispatcher
     bot::start(

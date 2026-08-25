@@ -11,6 +11,7 @@ pub type Db = SqlitePool;
 pub struct TrackedWalletWithUser {
     pub user_id: i64,
     pub chat_id: i64,
+    pub telegram_id: i64,
     pub wallet_address: String,
     pub label: Option<String>,
     pub last_activity_hash: Option<String>,
@@ -22,6 +23,7 @@ pub struct TrackedWalletWithUser {
 pub struct ManagedWalletWithUser {
     pub user_id: i64,
     pub chat_id: i64,
+    pub telegram_id: i64,
     pub wallet_address: String,
     pub label: Option<String>,
     pub encrypted_key: Vec<u8>,
@@ -30,6 +32,7 @@ pub struct ManagedWalletWithUser {
 
 #[derive(Debug, FromRow)]
 pub struct CallbackData {
+    pub user_id: i64,
     pub wallet_address: String,
     pub condition_id: String,
     pub token_id: Option<String>,
@@ -204,7 +207,7 @@ pub async fn get_managed_wallet(db: &Db, user_id: i64) -> Result<Option<models::
 
 pub async fn list_managed_wallets_with_users(db: &Db) -> Result<Vec<ManagedWalletWithUser>> {
     let wallets = sqlx::query_as::<_, ManagedWalletWithUser>(
-        "SELECT managed_wallets.user_id, users.chat_id, managed_wallets.wallet_address, \
+        "SELECT managed_wallets.user_id, users.chat_id, users.telegram_id, managed_wallets.wallet_address, \
          managed_wallets.label, managed_wallets.encrypted_key, managed_wallets.nonce \
          FROM managed_wallets \
          INNER JOIN users ON users.id = managed_wallets.user_id",
@@ -240,7 +243,7 @@ pub async fn update_managed_wallet_signature_type(
 
 pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalletWithUser>> {
     let wallets = sqlx::query_as::<_, TrackedWalletWithUser>(
-        "SELECT tracked_wallets.user_id, users.chat_id, tracked_wallets.wallet_address, \
+        "SELECT tracked_wallets.user_id, users.chat_id, users.telegram_id, tracked_wallets.wallet_address, \
          tracked_wallets.label, tracked_wallets.last_activity_hash, tracked_wallets.last_positions_hash \
          FROM tracked_wallets \
          INNER JOIN users ON users.id = tracked_wallets.user_id",
@@ -300,6 +303,7 @@ pub async fn update_tracked_wallet_positions_hash(
 
 pub async fn insert_callback_data(
     db: &Db,
+    user_id: i64,
     wallet_address: &str,
     condition_id: &str,
     token_id: Option<&str>,
@@ -310,9 +314,10 @@ pub async fn insert_callback_data(
     outcome: Option<&str>,
 ) -> Result<i64> {
     let result = sqlx::query(
-        "INSERT INTO callback_data (wallet_address, condition_id, token_id, side, price, size, market_title, outcome) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO callback_data (user_id, wallet_address, condition_id, token_id, side, price, size, market_title, outcome) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
+    .bind(user_id)
     .bind(wallet_address)
     .bind(condition_id)
     .bind(token_id)
@@ -329,7 +334,7 @@ pub async fn insert_callback_data(
 
 pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<CallbackData>> {
     let row = sqlx::query_as::<_, CallbackData>(
-        "SELECT wallet_address, condition_id, token_id, side, price, size, market_title, outcome FROM callback_data WHERE id = ?",
+        "SELECT user_id, wallet_address, condition_id, token_id, side, price, size, market_title, outcome FROM callback_data WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(db)
@@ -505,11 +510,13 @@ mod tests {
 
     #[tokio::test]
     async fn callback_data_insert_and_get() {
-        let (db, _user_id) = setup_db().await;
+        let (db, user_id) = setup_db().await;
 
-        let id = insert_callback_data(&db, "0xabc", "0xcond", None, None, None, None, None, None)
-            .await
-            .expect("insert callback_data");
+        let id = insert_callback_data(
+            &db, user_id, "0xabc", "0xcond", None, None, None, None, None, None,
+        )
+        .await
+        .expect("insert callback_data");
 
         let data = get_callback_data(&db, id)
             .await
@@ -518,16 +525,18 @@ mod tests {
 
         assert_eq!(data.wallet_address, "0xabc");
         assert_eq!(data.condition_id, "0xcond");
+        assert_eq!(data.user_id, user_id);
         assert!(data.token_id.is_none());
         assert!(data.side.is_none());
     }
 
     #[tokio::test]
     async fn callback_data_with_trade_fields() {
-        let (db, _user_id) = setup_db().await;
+        let (db, user_id) = setup_db().await;
 
         let id = insert_callback_data(
             &db,
+            user_id,
             "0xabc",
             "0xcond",
             Some("12345"),

@@ -11,8 +11,9 @@ pub struct Config {
     pub data_poll_interval: Duration,
     pub encryption_key: Option<EncryptionKey>,
     pub copy_trade_enabled: bool,
-    /// When set, only these Telegram user IDs may interact with the bot.
-    pub allowed_telegram_ids: Option<Vec<i64>>,
+    /// Telegram user IDs allowed to interact with the bot. Empty locks the
+    /// bot down; there is no open-access mode.
+    pub allowed_telegram_ids: Vec<i64>,
 }
 
 impl Config {
@@ -46,15 +47,13 @@ fn parse_enabled_flag(raw: Option<String>) -> bool {
     matches!(raw.as_deref().map(str::trim), Some(v) if v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
 }
 
-// None means the allowlist is disabled (open access); an empty/invalid
-// list locks the bot down entirely.
-fn parse_allowed_telegram_ids(raw: Option<String>) -> Option<Vec<i64>> {
-    let raw = raw?;
-    let ids: Vec<i64> = raw
+// Fail closed: an unset or empty list locks the bot down entirely. Only
+// explicit IDs grant access.
+fn parse_allowed_telegram_ids(raw: Option<String>) -> Vec<i64> {
+    raw.unwrap_or_default()
         .split(',')
         .filter_map(|part| part.trim().parse::<i64>().ok())
-        .collect();
-    Some(ids)
+        .collect()
 }
 
 fn parse_data_poll_interval(raw: Option<String>) -> Duration {
@@ -176,15 +175,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_allowed_telegram_ids_unset_is_open() {
-        assert!(parse_allowed_telegram_ids(None).is_none());
+    fn parse_allowed_telegram_ids_unset_locks_down() {
+        assert!(parse_allowed_telegram_ids(None).is_empty());
     }
 
     #[test]
     fn parse_allowed_telegram_ids_parses_csv() {
         assert_eq!(
             parse_allowed_telegram_ids(Some("123, 456,789".to_string())),
-            Some(vec![123, 456, 789]),
+            vec![123, 456, 789],
         );
     }
 
@@ -192,15 +191,12 @@ mod tests {
     fn parse_allowed_telegram_ids_skips_invalid_entries() {
         assert_eq!(
             parse_allowed_telegram_ids(Some("123, abc, 456".to_string())),
-            Some(vec![123, 456]),
+            vec![123, 456],
         );
     }
 
     #[test]
     fn parse_allowed_telegram_ids_empty_locks_down() {
-        assert_eq!(
-            parse_allowed_telegram_ids(Some(String::new())),
-            Some(vec![]),
-        );
+        assert!(parse_allowed_telegram_ids(Some(String::new())).is_empty());
     }
 }

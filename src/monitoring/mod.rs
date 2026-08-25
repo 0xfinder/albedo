@@ -21,10 +21,12 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use tokio::sync::Mutex;
+use zeroize::Zeroizing;
 
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
+use crate::utils::telegram_id_allowed;
 
 const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
@@ -37,6 +39,7 @@ pub fn spawn_data_polling(
     db: Db,
     poll_interval: Duration,
     copy_trade_enabled: bool,
+    allowed_telegram_ids: Vec<i64>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if poll_interval.is_zero() {
         return None;
@@ -55,6 +58,12 @@ pub fn spawn_data_polling(
             };
 
             for wallet in wallets {
+                // Revoked users must stop receiving notifications even though
+                // their tracked-wallet rows still exist.
+                if !telegram_id_allowed(&allowed_telegram_ids, wallet.telegram_id) {
+                    continue;
+                }
+
                 let address = match Address::from_str(&wallet.wallet_address) {
                     Ok(address) => address,
                     Err(_) => continue,
@@ -74,6 +83,7 @@ pub fn spawn_ws_user_events(
     bot: teloxide::prelude::Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
+    allowed_telegram_ids: Vec<i64>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if encryption_key.is_none() {
         return None;
@@ -87,6 +97,10 @@ pub fn spawn_ws_user_events(
             };
 
             for wallet in wallets {
+                if !telegram_id_allowed(&allowed_telegram_ids, wallet.telegram_id) {
+                    continue;
+                }
+
                 let encryption_key = encryption_key.clone();
                 let db = db.clone();
                 let bot = bot.clone();
@@ -204,8 +218,13 @@ async fn connect_user_events_once(
     encryption_key: EncryptionKey,
 ) -> color_eyre::eyre::Result<StreamOutcome> {
     let aad = crypto::build_aad(wallet.user_id, &wallet.wallet_address);
-    let decrypted = crypto::decrypt(&encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)?;
-    let private_key = String::from_utf8(decrypted)?;
+    let decrypted = Zeroizing::new(crypto::decrypt(
+        &encryption_key,
+        &wallet.nonce,
+        &wallet.encrypted_key,
+        &aad,
+    )?);
+    let private_key = Zeroizing::new(String::from_utf8(decrypted.to_vec())?);
     let signer = LocalSigner::from_str(&private_key)?.with_chain_id(Some(POLYGON));
 
     let address = signer.address();
@@ -559,6 +578,7 @@ async fn poll_activity(
                     };
                 if let Ok(cb_id) = db::insert_callback_data(
                     db,
+                    wallet.user_id,
                     &wallet.wallet_address,
                     condition_id,
                     trade_token,

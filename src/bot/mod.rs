@@ -9,7 +9,7 @@ pub async fn start(
     bot: Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Option<Vec<i64>>,
+    allowed_telegram_ids: Vec<i64>,
 ) -> color_eyre::eyre::Result<()> {
     let me = bot.get_me().await?;
     let bot_name = me.user.username.unwrap_or_default();

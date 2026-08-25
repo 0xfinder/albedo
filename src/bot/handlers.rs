@@ -18,6 +18,8 @@ use teloxide::utils::command::parse_command;
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
+use crate::utils::telegram_id_allowed;
+use zeroize::Zeroizing;
 
 const HELP_TEXT: &str = "Available commands:\n\
 /start - Start the bot\n\
@@ -31,14 +33,6 @@ const HELP_TEXT: &str = "Available commands:\n\
 fn data_client() -> &'static DataClient {
     static CLIENT: OnceLock<DataClient> = OnceLock::new();
     CLIENT.get_or_init(DataClient::default)
-}
-
-// An unset allowlist means open access; a set list must contain the caller.
-fn is_allowed(allowed_telegram_ids: &Option<Vec<i64>>, telegram_id: i64) -> bool {
-    match allowed_telegram_ids {
-        Some(ids) => ids.contains(&telegram_id),
-        None => true,
-    }
 }
 
 const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
@@ -59,7 +53,7 @@ pub async fn handle_message(
     db: Db,
     bot_name: String,
     encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Option<Vec<i64>>,
+    allowed_telegram_ids: Vec<i64>,
 ) -> ResponseResult<()> {
     if !msg.chat.is_private() {
         bot.send_message(
@@ -81,7 +75,7 @@ pub async fn handle_message(
         return Ok(());
     };
 
-    if !is_allowed(&allowed_telegram_ids, user.id.0 as i64) {
+    if !telegram_id_allowed(&allowed_telegram_ids, user.id.0 as i64) {
         bot.send_message(
             msg.chat.id,
             format!(
@@ -144,7 +138,7 @@ pub async fn handle_callback(
     query: CallbackQuery,
     db: Db,
     encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Option<Vec<i64>>,
+    allowed_telegram_ids: Vec<i64>,
 ) -> ResponseResult<()> {
     if let Some(message) = query.message.as_ref() {
         if !message.chat().is_private() {
@@ -153,7 +147,7 @@ pub async fn handle_callback(
         }
     }
 
-    if !is_allowed(&allowed_telegram_ids, query.from.id.0 as i64) {
+    if !telegram_id_allowed(&allowed_telegram_ids, query.from.id.0 as i64) {
         bot.answer_callback_query(query.id)
             .text(format!(
                 "⛔ Not authorized. Your Telegram ID: {}",
@@ -461,8 +455,15 @@ pub async fn handle_callback(
             if let Some(id_str) = data.strip_prefix("sp:") {
                 bot.answer_callback_query(query.id).await?;
                 if let Ok(cb_id) = id_str.parse::<i64>() {
-                    handle_show_positions(&bot, chat_id, &db, cb_id, query.message.as_ref())
-                        .await?;
+                    handle_show_positions(
+                        &bot,
+                        chat_id,
+                        &db,
+                        user_id,
+                        cb_id,
+                        query.message.as_ref(),
+                    )
+                    .await?;
                 }
             }
         }
@@ -528,7 +529,7 @@ pub async fn handle_callback(
                 .unwrap_or(ChatId(query.from.id.0 as i64));
             if let Some(id_str) = data.strip_prefix("ct_flip:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_flip(&bot, chat_id, &db, ct_id, &query).await?;
+                    handle_copy_trade_flip(&bot, chat_id, &db, user_id, ct_id, &query).await?;
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -541,7 +542,8 @@ pub async fn handle_callback(
                 .unwrap_or(ChatId(query.from.id.0 as i64));
             if let Some(id_str) = data.strip_prefix("ct_market:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_toggle_type(&bot, chat_id, &db, ct_id, &query).await?;
+                    handle_copy_trade_toggle_type(&bot, chat_id, &db, user_id, ct_id, &query)
+                        .await?;
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -741,7 +743,22 @@ async fn handle_pending_action(
             send_track_menu(&bot, msg.chat.id).await?;
         }
         ACTION_MANAGE_AUTH_KEY => {
-            let _ = bot.delete_message(msg.chat.id, msg.id).await;
+            // The key transited Telegram in plaintext. If we cannot remove
+            // that message, refuse to store the key and tell the user to
+            // consider it exposed.
+            if bot.delete_message(msg.chat.id, msg.id).await.is_err() {
+                let _ = db::clear_pending_state(db, user_id).await;
+                bot.send_message(
+                    msg.chat.id,
+                    "⚠️ I couldn't delete your message, so I did <b>not</b> save this key.\n\
+                     The key was never stored, but it remains visible in this chat — \
+                     treat it as exposed and move funds to a new wallet.",
+                )
+                .parse_mode(ParseMode::Html)
+                .await?;
+                send_manage_menu(&bot, msg.chat.id).await?;
+                return Ok(());
+            }
 
             let Some(encryption_key) = encryption_key else {
                 let _ = db::clear_pending_state(db, user_id).await;
@@ -1914,13 +1931,18 @@ async fn load_managed_wallet_signer(
     };
 
     let aad = crypto::build_aad(user_id, &wallet.wallet_address);
-    let decrypted = crypto::decrypt(&encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)
-        .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?;
-    let private_key = String::from_utf8(decrypted)
-        .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?;
+    let decrypted = Zeroizing::new(
+        crypto::decrypt(&encryption_key, &wallet.nonce, &wallet.encrypted_key, &aad)
+            .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?,
+    );
+    let private_key = Zeroizing::new(
+        String::from_utf8(decrypted.to_vec())
+            .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?,
+    );
     let signer = LocalSigner::from_str(&private_key)
         .map_err(|_| "Sorry, I couldn't unlock that wallet.".to_string())?
         .with_chain_id(Some(POLYGON));
+    drop(private_key);
 
     let derived = normalize_wallet_address(&signer.address().to_string());
     if derived != wallet.wallet_address {
@@ -2136,10 +2158,21 @@ async fn handle_show_positions(
     bot: &Bot,
     chat_id: ChatId,
     db: &Db,
+    user_id: i64,
     cb_id: i64,
     source_message: Option<&teloxide::types::MaybeInaccessibleMessage>,
 ) -> ResponseResult<()> {
-    let callback_data = db::get_callback_data(db, cb_id).await.ok().flatten();
+    // callback_data rows are addressed by sequential IDs, so only the user
+    // who received the activity notification may use its button.
+    let callback_data = match db::get_callback_data(db, cb_id).await {
+        Ok(Some(data)) if data.user_id == user_id => Some(data),
+        Ok(Some(_)) => {
+            bot.send_message(chat_id, "This button does not belong to this chat.")
+                .await?;
+            return Ok(());
+        }
+        _ => None,
+    };
     let wallet_address = match callback_data.as_ref() {
         Some(data) => data.wallet_address.clone(),
         None => {
@@ -2386,7 +2419,7 @@ async fn handle_copy_trade_init(
     }
 
     let cb_data = match db::get_callback_data(db, cb_id).await {
-        Ok(Some(data)) => data,
+        Ok(Some(data)) if data.user_id == user_id => data,
         _ => {
             bot.send_message(chat_id, "Could not load trade data.")
                 .await?;
@@ -2461,12 +2494,11 @@ async fn handle_copy_trade_flip(
     bot: &Bot,
     chat_id: ChatId,
     db: &Db,
+    user_id: i64,
     ct_id: i64,
     query: &CallbackQuery,
 ) -> ResponseResult<()> {
-    let Some(state) =
-        load_owned_copy_trade_state(bot, chat_id, db, query.from.id.0 as i64, ct_id).await
-    else {
+    let Some(state) = load_owned_copy_trade_state(bot, chat_id, db, user_id, ct_id).await else {
         return Ok(());
     };
 
@@ -2496,12 +2528,11 @@ async fn handle_copy_trade_toggle_type(
     bot: &Bot,
     chat_id: ChatId,
     db: &Db,
+    user_id: i64,
     ct_id: i64,
     query: &CallbackQuery,
 ) -> ResponseResult<()> {
-    let Some(state) =
-        load_owned_copy_trade_state(bot, chat_id, db, query.from.id.0 as i64, ct_id).await
-    else {
+    let Some(state) = load_owned_copy_trade_state(bot, chat_id, db, user_id, ct_id).await else {
         return Ok(());
     };
 
