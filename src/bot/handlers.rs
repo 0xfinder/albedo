@@ -33,6 +33,14 @@ fn data_client() -> &'static DataClient {
     CLIENT.get_or_init(DataClient::default)
 }
 
+// An unset allowlist means open access; a set list must contain the caller.
+fn is_allowed(allowed_telegram_ids: &Option<Vec<i64>>, telegram_id: i64) -> bool {
+    match allowed_telegram_ids {
+        Some(ids) => ids.contains(&telegram_id),
+        None => true,
+    }
+}
+
 const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
 const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
 const ACTION_TRACK_REMOVE: &str = "track_remove";
@@ -51,6 +59,7 @@ pub async fn handle_message(
     db: Db,
     bot_name: String,
     encryption_key: Option<EncryptionKey>,
+    allowed_telegram_ids: Option<Vec<i64>>,
 ) -> ResponseResult<()> {
     if !msg.chat.is_private() {
         bot.send_message(
@@ -71,6 +80,18 @@ pub async fn handle_message(
             .await?;
         return Ok(());
     };
+
+    if !is_allowed(&allowed_telegram_ids, user.id.0 as i64) {
+        bot.send_message(
+            msg.chat.id,
+            format!(
+                "⛔ You are not authorized to use this bot.\nYour Telegram ID: {}",
+                user.id.0
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
 
     let telegram_id = user.id.0 as i64;
     let chat_id = msg.chat.id.0;
@@ -123,12 +144,24 @@ pub async fn handle_callback(
     query: CallbackQuery,
     db: Db,
     encryption_key: Option<EncryptionKey>,
+    allowed_telegram_ids: Option<Vec<i64>>,
 ) -> ResponseResult<()> {
     if let Some(message) = query.message.as_ref() {
         if !message.chat().is_private() {
             bot.answer_callback_query(query.id).await?;
             return Ok(());
         }
+    }
+
+    if !is_allowed(&allowed_telegram_ids, query.from.id.0 as i64) {
+        bot.answer_callback_query(query.id)
+            .text(format!(
+                "⛔ Not authorized. Your Telegram ID: {}",
+                query.from.id.0
+            ))
+            .show_alert(true)
+            .await?;
+        return Ok(());
     }
 
     let Some(data) = query.data.clone() else {

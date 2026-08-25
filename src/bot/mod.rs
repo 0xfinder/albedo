@@ -9,6 +9,7 @@ pub async fn start(
     bot: Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
+    allowed_telegram_ids: Option<Vec<i64>>,
 ) -> color_eyre::eyre::Result<()> {
     let me = bot.get_me().await?;
     let bot_name = me.user.username.unwrap_or_default();
@@ -20,7 +21,12 @@ pub async fn start(
         .branch(Update::filter_callback_query().endpoint(handlers::handle_callback));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![db, bot_name, encryption_key])
+        .dependencies(dptree::deps![
+            db,
+            bot_name,
+            encryption_key,
+            allowed_telegram_ids
+        ])
         .enable_ctrlc_handler()
         .build()
         .dispatch()

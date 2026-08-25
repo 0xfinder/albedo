@@ -11,6 +11,8 @@ pub struct Config {
     pub data_poll_interval: Duration,
     pub encryption_key: Option<EncryptionKey>,
     pub copy_trade_enabled: bool,
+    /// When set, only these Telegram user IDs may interact with the bot.
+    pub allowed_telegram_ids: Option<Vec<i64>>,
 }
 
 impl Config {
@@ -25,6 +27,8 @@ impl Config {
             parse_data_poll_interval(env::var("POLYMARKET_DATA_POLL_SECONDS").ok());
         let encryption_key = read_encryption_key()?;
         let copy_trade_enabled = parse_enabled_flag(env::var("COPY_TRADE_ENABLED").ok());
+        let allowed_telegram_ids =
+            parse_allowed_telegram_ids(env::var("ALLOWED_TELEGRAM_IDS").ok());
 
         Ok(Self {
             telegram_token: env::var("TELEGRAM_TOKEN").context("TELEGRAM_TOKEN not set")?,
@@ -32,6 +36,7 @@ impl Config {
             data_poll_interval,
             encryption_key,
             copy_trade_enabled,
+            allowed_telegram_ids,
         })
     }
 }
@@ -39,6 +44,17 @@ impl Config {
 // Feature flags default to off; only explicit truthy values enable them.
 fn parse_enabled_flag(raw: Option<String>) -> bool {
     matches!(raw.as_deref().map(str::trim), Some(v) if v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+}
+
+// None means the allowlist is disabled (open access); an empty/invalid
+// list locks the bot down entirely.
+fn parse_allowed_telegram_ids(raw: Option<String>) -> Option<Vec<i64>> {
+    let raw = raw?;
+    let ids: Vec<i64> = raw
+        .split(',')
+        .filter_map(|part| part.trim().parse::<i64>().ok())
+        .collect();
+    Some(ids)
 }
 
 fn parse_data_poll_interval(raw: Option<String>) -> Duration {
@@ -157,5 +173,34 @@ mod tests {
         assert!(parse_enabled_flag(Some("true".to_string())));
         assert!(parse_enabled_flag(Some("YES".to_string())));
         assert!(parse_enabled_flag(Some(" yes ".to_string())));
+    }
+
+    #[test]
+    fn parse_allowed_telegram_ids_unset_is_open() {
+        assert!(parse_allowed_telegram_ids(None).is_none());
+    }
+
+    #[test]
+    fn parse_allowed_telegram_ids_parses_csv() {
+        assert_eq!(
+            parse_allowed_telegram_ids(Some("123, 456,789".to_string())),
+            Some(vec![123, 456, 789]),
+        );
+    }
+
+    #[test]
+    fn parse_allowed_telegram_ids_skips_invalid_entries() {
+        assert_eq!(
+            parse_allowed_telegram_ids(Some("123, abc, 456".to_string())),
+            Some(vec![123, 456]),
+        );
+    }
+
+    #[test]
+    fn parse_allowed_telegram_ids_empty_locks_down() {
+        assert_eq!(
+            parse_allowed_telegram_ids(Some(String::new())),
+            Some(vec![]),
+        );
     }
 }

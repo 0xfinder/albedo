@@ -36,7 +36,13 @@ async fn main() -> Result<()> {
         monitoring::spawn_ws_user_events(bot.clone(), db.clone(), config.encryption_key.clone());
 
     // Start bot dispatcher
-    bot::start(bot, db, config.encryption_key.clone()).await?;
+    bot::start(
+        bot,
+        db,
+        config.encryption_key.clone(),
+        config.allowed_telegram_ids,
+    )
+    .await?;
 
     Ok(())
 }
