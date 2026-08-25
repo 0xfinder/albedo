@@ -508,9 +508,14 @@ pub async fn handle_callback(
                 .unwrap_or(ChatId(query.from.id.0 as i64));
             if let Some(id_str) = data.strip_prefix("ct_cancel:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
-                    let _ = db::delete_copy_trade_state(&db, ct_id).await;
-                    let _ = db::clear_pending_state(&db, user_id).await;
-                    bot.send_message(chat_id, "Copy trade cancelled.").await?;
+                    if load_owned_copy_trade_state(&bot, chat_id, &db, user_id, ct_id)
+                        .await
+                        .is_some()
+                    {
+                        let _ = db::delete_copy_trade_state(&db, ct_id).await;
+                        let _ = db::clear_pending_state(&db, user_id).await;
+                        bot.send_message(chat_id, "Copy trade cancelled.").await?;
+                    }
                 }
             }
             bot.answer_callback_query(query.id).await?;
@@ -1240,6 +1245,13 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
+            if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
+                .await
+                .is_none()
+            {
+                let _ = db::clear_pending_state(db, user_id).await;
+                return Ok(());
+            }
             let _ = db::update_copy_trade_field(db, ct_id, "price", price).await;
             let _ = db::clear_pending_state(db, user_id).await;
             send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
@@ -1274,6 +1286,13 @@ async fn handle_pending_action(
                     return Ok(());
                 }
             };
+            if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
+                .await
+                .is_none()
+            {
+                let _ = db::clear_pending_state(db, user_id).await;
+                return Ok(());
+            }
             let _ = db::update_copy_trade_field(db, ct_id, "size", size).await;
             let _ = db::clear_pending_state(db, user_id).await;
             send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
@@ -2418,6 +2437,26 @@ async fn handle_copy_trade_init(
     Ok(())
 }
 
+// Copy trade state rows are addressed by sequential IDs, so every read or
+// mutation must verify the row belongs to the requesting user.
+async fn load_owned_copy_trade_state(
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Db,
+    user_id: i64,
+    ct_id: i64,
+) -> Option<db::CopyTradeState> {
+    match db::get_copy_trade_state(db, ct_id).await {
+        Ok(Some(state)) if state.user_id == user_id => Some(state),
+        _ => {
+            let _ = bot
+                .send_message(chat_id, "Copy trade session not found.")
+                .await;
+            None
+        }
+    }
+}
+
 async fn handle_copy_trade_flip(
     bot: &Bot,
     chat_id: ChatId,
@@ -2425,13 +2464,10 @@ async fn handle_copy_trade_flip(
     ct_id: i64,
     query: &CallbackQuery,
 ) -> ResponseResult<()> {
-    let state = match db::get_copy_trade_state(db, ct_id).await {
-        Ok(Some(state)) => state,
-        _ => {
-            bot.send_message(chat_id, "Could not load copy trade state.")
-                .await?;
-            return Ok(());
-        }
+    let Some(state) =
+        load_owned_copy_trade_state(bot, chat_id, db, query.from.id.0 as i64, ct_id).await
+    else {
+        return Ok(());
     };
 
     let new_side = if state.side == "Buy" { "Sell" } else { "Buy" };
@@ -2463,13 +2499,10 @@ async fn handle_copy_trade_toggle_type(
     ct_id: i64,
     query: &CallbackQuery,
 ) -> ResponseResult<()> {
-    let state = match db::get_copy_trade_state(db, ct_id).await {
-        Ok(Some(state)) => state,
-        _ => {
-            bot.send_message(chat_id, "Could not load copy trade state.")
-                .await?;
-            return Ok(());
-        }
+    let Some(state) =
+        load_owned_copy_trade_state(bot, chat_id, db, query.from.id.0 as i64, ct_id).await
+    else {
+        return Ok(());
     };
 
     let new_type = if state.order_type == "limit" {
@@ -2506,13 +2539,8 @@ async fn handle_copy_trade_confirm(
     ct_id: i64,
     encryption_key: Option<EncryptionKey>,
 ) -> ResponseResult<()> {
-    let state = match db::get_copy_trade_state(db, ct_id).await {
-        Ok(Some(state)) => state,
-        _ => {
-            bot.send_message(chat_id, "Could not load copy trade state.")
-                .await?;
-            return Ok(());
-        }
+    let Some(state) = load_owned_copy_trade_state(bot, chat_id, db, user_id, ct_id).await else {
+        return Ok(());
     };
 
     let Some(encryption_key) = encryption_key else {
