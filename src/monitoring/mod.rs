@@ -36,6 +36,7 @@ pub fn spawn_data_polling(
     bot: teloxide::prelude::Bot,
     db: Db,
     poll_interval: Duration,
+    copy_trade_enabled: bool,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if poll_interval.is_zero() {
         return None;
@@ -59,7 +60,8 @@ pub fn spawn_data_polling(
                     Err(_) => continue,
                 };
 
-                let _ = poll_activity(&bot, &client, &db, &wallet, address).await;
+                let _ =
+                    poll_activity(&bot, &client, &db, &wallet, address, copy_trade_enabled).await;
                 let _ = poll_positions(&bot, &client, &db, &wallet, address).await;
 
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -458,6 +460,7 @@ async fn poll_activity(
     db: &Db,
     wallet: &db::TrackedWalletWithUser,
     address: Address,
+    copy_trade_enabled: bool,
 ) -> color_eyre::eyre::Result<()> {
     let request = ActivityRequest::builder().user(address).limit(500)?.build();
     let activities = match client.activity(&request).await {
@@ -571,7 +574,7 @@ async fn poll_activity(
                         "📊 Show Positions",
                         format!("sp:{cb_id}"),
                     )];
-                    if trade_token.is_some() {
+                    if trade_token.is_some() && copy_trade_enabled {
                         buttons.push(InlineKeyboardButton::callback(
                             "📋 Copy Trade",
                             format!("ct:{cb_id}"),

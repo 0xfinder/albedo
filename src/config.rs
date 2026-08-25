@@ -10,6 +10,7 @@ pub struct Config {
     pub database_url: String,
     pub data_poll_interval: Duration,
     pub encryption_key: Option<EncryptionKey>,
+    pub copy_trade_enabled: bool,
 }
 
 impl Config {
@@ -23,14 +24,21 @@ impl Config {
         let data_poll_interval =
             parse_data_poll_interval(env::var("POLYMARKET_DATA_POLL_SECONDS").ok());
         let encryption_key = read_encryption_key()?;
+        let copy_trade_enabled = parse_enabled_flag(env::var("COPY_TRADE_ENABLED").ok());
 
         Ok(Self {
             telegram_token: env::var("TELEGRAM_TOKEN").context("TELEGRAM_TOKEN not set")?,
             database_url,
             data_poll_interval,
             encryption_key,
+            copy_trade_enabled,
         })
     }
+}
+
+// Feature flags default to off; only explicit truthy values enable them.
+fn parse_enabled_flag(raw: Option<String>) -> bool {
+    matches!(raw.as_deref().map(str::trim), Some(v) if v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
 }
 
 fn parse_data_poll_interval(raw: Option<String>) -> Duration {
@@ -134,5 +142,20 @@ mod tests {
             parse_data_poll_interval(Some("abc".to_string())),
             Duration::from_secs(1),
         );
+    }
+
+    #[test]
+    fn parse_enabled_flag_defaults_to_off() {
+        assert!(!parse_enabled_flag(None));
+        assert!(!parse_enabled_flag(Some(String::new())));
+        assert!(!parse_enabled_flag(Some("0".to_string())));
+    }
+
+    #[test]
+    fn parse_enabled_flag_accepts_truthy_values() {
+        assert!(parse_enabled_flag(Some("1".to_string())));
+        assert!(parse_enabled_flag(Some("true".to_string())));
+        assert!(parse_enabled_flag(Some("YES".to_string())));
+        assert!(parse_enabled_flag(Some(" yes ".to_string())));
     }
 }
