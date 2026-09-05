@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use polymarket_client_sdk::clob::types::SignatureType;
+use polymarket_client_sdk::data::Client as DataClient;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 
@@ -107,6 +108,7 @@ pub async fn handle_message(
         Ok((Some(action), data)) => {
             return handle_pending_action(
                 bot,
+                &state.data_client,
                 msg,
                 &db,
                 user_id,
@@ -279,7 +281,7 @@ pub async fn handle_callback(
                 user_id,
             );
             let chat_id = callback_chat_id(&query);
-            send_managed_positions(&bot, chat_id, &db, user_id).await?;
+            send_managed_positions(&bot, &state.data_client, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:market_order" => {
@@ -504,6 +506,7 @@ pub async fn handle_callback(
                 if let Ok(cb_id) = id_str.parse::<i64>() {
                     handle_show_positions(
                         &bot,
+                        &state.data_client,
                         chat_id,
                         &db,
                         user_id,
@@ -690,6 +693,7 @@ async fn handle_help(bot: Bot, msg: Message) -> ResponseResult<()> {
 
 async fn handle_pending_action(
     bot: Bot,
+    client: &DataClient,
     msg: Message,
     db: &Db,
     user_id: i64,
@@ -724,7 +728,7 @@ async fn handle_pending_action(
             super::manage::handle_auth_label_input(&bot, &msg, db, user_id, data, input).await?
         }
         ACTION_MANAGE_POSITIONS => {
-            super::manage::handle_positions_input(&bot, &msg, db, user_id).await?
+            super::manage::handle_positions_input(&bot, client, &msg, db, user_id).await?
         }
         ACTION_MANAGE_MARKET_ORDER => {
             super::orders::handle_market_order_input(&bot, &msg, db, user_id, input, encryption_key)

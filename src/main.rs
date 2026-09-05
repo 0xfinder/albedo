@@ -50,6 +50,7 @@ async fn main() -> Result<()> {
         bot,
         db,
         config: Arc::new(config),
+        data_client: polymarket_client_sdk::data::Client::default(),
     });
 
     let _data_handle = monitoring::spawn_data_polling(state.clone());

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use polymarket_client_sdk::data::Client as DataClient;
 use teloxide::prelude::Bot;
 
 use crate::config::Config;
@@ -14,4 +15,6 @@ pub struct AppState {
     pub bot: Bot,
     pub db: Db,
     pub config: Arc<Config>,
+    /// Reused HTTP client (and connection pool) for the Data API.
+    pub data_client: DataClient,
 }

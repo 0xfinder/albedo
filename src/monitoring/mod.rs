@@ -59,7 +59,6 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
     }
 
     Some(tokio::spawn(async move {
-        let client = DataClient::default();
         let mut interval = tokio::time::interval(state.config.data_poll_interval);
 
         loop {
@@ -98,7 +97,7 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
 
                 if let Err(err) = poll_activity(
                     &state.bot,
-                    &client,
+                    &state.data_client,
                     &state.db,
                     &wallet,
                     address,
@@ -113,7 +112,8 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
                     );
                 }
                 if let Err(err) =
-                    poll_positions(&state.bot, &client, &state.db, &wallet, address).await
+                    poll_positions(&state.bot, &state.data_client, &state.db, &wallet, address)
+                        .await
                 {
                     tracing::warn!(
                         wallet = wallet.wallet_address.as_str(),
@@ -159,9 +159,11 @@ pub fn spawn_ws_user_events(state: Arc<AppState>) -> Option<tokio::task::JoinHan
                 let encryption_key = encryption_key.clone();
                 let db = state.db.clone();
                 let bot = state.bot.clone();
+                let data_client = state.data_client.clone();
                 tokio::spawn(async move {
                     if let Err(err) =
-                        connect_user_events(wallet.clone(), db, bot, encryption_key).await
+                        connect_user_events(wallet.clone(), db, bot, encryption_key, data_client)
+                            .await
                     {
                         tracing::warn!(
                             wallet = wallet.wallet_address.as_str(),
@@ -272,9 +274,12 @@ async fn connect_user_events(
     db: Db,
     bot: teloxide::prelude::Bot,
     encryption_key: EncryptionKey,
+    data_client: DataClient,
 ) -> color_eyre::eyre::Result<()> {
-    run_ws_with_backoff(|| connect_user_events_once(&wallet, &db, &bot, encryption_key.clone()))
-        .await
+    run_ws_with_backoff(|| {
+        connect_user_events_once(&wallet, &db, &bot, encryption_key.clone(), &data_client)
+    })
+    .await
 }
 
 async fn connect_user_events_once(
@@ -282,6 +287,7 @@ async fn connect_user_events_once(
     db: &Db,
     bot: &teloxide::prelude::Bot,
     encryption_key: EncryptionKey,
+    data_client: &DataClient,
 ) -> color_eyre::eyre::Result<StreamOutcome> {
     let aad = crypto::build_aad(wallet.user_id, &wallet.wallet_address);
     let decrypted = Zeroizing::new(crypto::decrypt(
@@ -300,7 +306,6 @@ async fn connect_user_events_once(
 
     let client = WsClient::default().authenticate(credentials, address)?;
     let stream = Box::pin(client.subscribe_user_events(Vec::new())?);
-    let data_client = DataClient::default();
     let market_cache: MarketCache = Arc::new(Mutex::new(HashMap::new()));
 
     Ok(consume_user_event_stream_with_handler(stream, |message| {

@@ -1,8 +1,5 @@
 //! Shared pending-action keys, reply strings, and tiny helpers for bot modules.
 
-use std::sync::OnceLock;
-
-use polymarket_client_sdk::data::Client as DataClient;
 use teloxide::prelude::*;
 
 pub(crate) const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
@@ -30,13 +27,6 @@ pub(crate) const SIG_SAFE: &str = "sig:2";
 // Cap positions shown to keep Telegram messages under the length limit.
 pub(crate) const POSITIONS_DISPLAY_LIMIT: usize = 8;
 pub(crate) const POSITIONS_PAGE_LIMIT: i32 = 200;
-
-// Reuse one HTTP client (and its connection pool) across all requests instead
-// of paying a fresh TLS handshake per call.
-pub(crate) fn data_client() -> &'static DataClient {
-    static CLIENT: OnceLock<DataClient> = OnceLock::new();
-    CLIENT.get_or_init(DataClient::default)
-}
 
 pub(crate) fn callback_chat_id(query: &CallbackQuery) -> ChatId {
     query

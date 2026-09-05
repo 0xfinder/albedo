@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::types::SignatureType;
+use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::types::response::Position;
@@ -16,7 +17,7 @@ use zeroize::Zeroizing;
 
 use super::common::{
     ACTION_MANAGE_AUTH_LABEL, MSG_ACTION_EXPIRED, MSG_SEND_LABEL_SKIP, MSG_WALLET_LOAD_FAILED,
-    POSITIONS_DISPLAY_LIMIT, POSITIONS_PAGE_LIMIT, data_client, log_db_error,
+    POSITIONS_DISPLAY_LIMIT, POSITIONS_PAGE_LIMIT, log_db_error,
 };
 use super::menus::{
     manage_cancel_menu_markup, manage_label_menu_markup, manage_menu_markup,
@@ -42,6 +43,7 @@ pub(crate) async fn send_manage_menu(bot: &Bot, chat_id: ChatId) -> ResponseResu
 
 pub(crate) async fn send_managed_positions(
     bot: &Bot,
+    client: &DataClient,
     chat_id: ChatId,
     db: &Db,
     user_id: i64,
@@ -89,7 +91,6 @@ pub(crate) async fn send_managed_positions(
         _ => signer_address,
     };
 
-    let client = data_client();
     let builder = match PositionsRequest::builder()
         .user(address)
         .limit(POSITIONS_PAGE_LIMIT)
@@ -505,6 +506,7 @@ pub(crate) fn build_directional_summary(positions: &[&Position]) -> Option<Strin
 
 pub(crate) async fn handle_show_positions(
     bot: &Bot,
+    client: &DataClient,
     chat_id: ChatId,
     db: &Db,
     user_id: i64,
@@ -554,7 +556,6 @@ pub(crate) async fn handle_show_positions(
         }
     };
 
-    let client = data_client();
     let request = match condition_id {
         Some(condition_id) => {
             let builder = PositionsRequest::builder()
@@ -885,6 +886,7 @@ pub(crate) async fn handle_auth_label_input(
 
 pub(crate) async fn handle_positions_input(
     bot: &Bot,
+    client: &DataClient,
     msg: &Message,
     db: &Db,
     user_id: i64,
@@ -894,6 +896,6 @@ pub(crate) async fn handle_positions_input(
         "clear_pending_state",
         user_id,
     );
-    send_managed_positions(&bot, msg.chat.id, db, user_id).await?;
+    send_managed_positions(bot, client, msg.chat.id, db, user_id).await?;
     Ok(())
 }
