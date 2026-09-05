@@ -14,6 +14,9 @@ use teloxide::prelude::*;
 
 use state::AppState;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub const VERSION: &str = env!("GIT_VERSION");
 
 #[tokio::main]
