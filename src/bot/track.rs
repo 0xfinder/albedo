@@ -8,7 +8,7 @@ use super::common::{
     ACTION_TRACK_ADD_LABEL, MSG_ACTION_EXPIRED, MSG_SEND_LABEL_SKIP, log_db_error,
 };
 use super::menus::{label_menu_markup, send_track_menu};
-use super::parse::{html_escape, is_valid_wallet_address, normalize_wallet_address};
+use super::parse::{WalletAddress, html_escape};
 use crate::db::{self, Db};
 
 pub(crate) async fn finalize_track_add(
@@ -110,16 +110,15 @@ pub(crate) async fn handle_address_input(
     user_id: i64,
     input: &str,
 ) -> ResponseResult<()> {
-    if !is_valid_wallet_address(input) {
+    let Some(wallet_address) = WalletAddress::parse(input) else {
         bot.send_message(
             msg.chat.id,
             "That wallet address looks invalid. Expected 0x + 40 hex characters.",
         )
         .await?;
         return Ok(());
-    }
-
-    let wallet_address = normalize_wallet_address(input);
+    };
+    let wallet_address = wallet_address.as_str();
     if let Err(_err) = db::set_pending_state(
         db,
         user_id,
@@ -178,16 +177,15 @@ pub(crate) async fn handle_remove_input(
     user_id: i64,
     input: &str,
 ) -> ResponseResult<()> {
-    if !is_valid_wallet_address(input) {
+    let Some(wallet_address) = WalletAddress::parse(input) else {
         bot.send_message(
             msg.chat.id,
             "That wallet address looks invalid. Expected 0x + 40 hex characters.",
         )
         .await?;
         return Ok(());
-    }
-
-    let wallet_address = normalize_wallet_address(input);
+    };
+    let wallet_address = wallet_address.as_str();
     let removed = match db::remove_tracked_wallet(db, user_id, &wallet_address).await {
         Ok(removed) => removed,
         Err(_err) => {

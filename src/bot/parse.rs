@@ -9,21 +9,42 @@ use teloxide::utils::command::parse_command;
 use super::common::{EVM_ADDRESS_LEN, SIG_PROXY, SIG_SAFE};
 use crate::utils::number_format;
 
-pub(crate) fn normalize_wallet_address(raw: &str) -> String {
-    raw.trim().to_lowercase()
+/// Lowercase `0x` + 40 hex wallet address. The only way to build one from
+/// user input is [`WalletAddress::parse`], so validated addresses cannot be
+/// confused with raw strings.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct WalletAddress(String);
+
+impl WalletAddress {
+    pub(crate) fn parse(raw: &str) -> Option<Self> {
+        let normalized = raw.trim().to_lowercase();
+        if !normalized.starts_with("0x") {
+            return None;
+        }
+        if normalized.len() != EVM_ADDRESS_LEN {
+            return None;
+        }
+        if !normalized[2..].chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some(Self(normalized))
+    }
+
+    /// Find the first valid address in free text, e.g. a pasted message.
+    pub(crate) fn extract(text: &str) -> Option<Self> {
+        text.split(|c: char| !(c.is_ascii_hexdigit() || c == 'x' || c == 'X'))
+            .find_map(Self::parse)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-pub(crate) fn is_valid_wallet_address(raw: &str) -> bool {
-    let trimmed = raw.trim();
-    if !trimmed.starts_with("0x") {
-        return false;
+impl std::fmt::Display for WalletAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
-
-    if trimmed.len() != EVM_ADDRESS_LEN {
-        return false;
-    }
-
-    trimmed[2..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 pub(crate) fn parse_incoming_command(text: &str, bot_name: &str) -> Option<(String, Vec<String>)> {
@@ -115,16 +136,6 @@ pub(crate) fn html_escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-pub(crate) fn extract_wallet_address_from_text(text: &str) -> Option<String> {
-    text.split(|c: char| !(c.is_ascii_hexdigit() || c == 'x' || c == 'X'))
-        .find(|part| {
-            part.len() == EVM_ADDRESS_LEN
-                && (part.starts_with("0x") || part.starts_with("0X"))
-                && part[2..].chars().all(|c| c.is_ascii_hexdigit())
-        })
-        .map(|part| part.to_ascii_lowercase())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +179,41 @@ mod tests {
             format_signature_type(SignatureType::GnosisSafe),
             "Gnosis Safe"
         );
+    }
+
+    #[test]
+    fn wallet_address_parse_accepts_normalized_forms() {
+        let lower = "0x".to_string() + &"ab".repeat(20);
+        assert_eq!(
+            WalletAddress::parse(&lower)
+                .as_ref()
+                .map(WalletAddress::as_str),
+            Some(lower.as_str())
+        );
+        assert_eq!(
+            WalletAddress::parse(&("  ".to_string() + &lower.to_uppercase() + "  "))
+                .as_ref()
+                .map(WalletAddress::as_str),
+            Some(lower.as_str())
+        );
+    }
+
+    #[test]
+    fn wallet_address_parse_rejects_bad_input() {
+        assert!(WalletAddress::parse("").is_none());
+        assert!(WalletAddress::parse("0x1234").is_none());
+        assert!(WalletAddress::parse(&("0x".to_string() + &"zz".repeat(20))).is_none());
+        assert!(WalletAddress::parse("not an address").is_none());
+    }
+
+    #[test]
+    fn wallet_address_extract_finds_first_address() {
+        let address = "0x".to_string() + &"12".repeat(20);
+        let found = WalletAddress::extract(&format!("send to {address} please"));
+        assert_eq!(
+            found.as_ref().map(WalletAddress::as_str),
+            Some(address.as_str())
+        );
+        assert!(WalletAddress::extract("nothing here").is_none());
     }
 }

@@ -23,9 +23,8 @@ use super::menus::{
     manage_remove_confirm_markup, manage_wallet_type_prompt_markup,
 };
 use super::parse::{
-    extract_wallet_address_from_text, format_decimal, format_signature_type, format_signed_usd,
-    format_value_change, html_escape, normalize_wallet_address, parse_signature_type,
-    signature_type_from_db,
+    WalletAddress, format_decimal, format_signature_type, format_signed_usd, format_value_change,
+    html_escape, parse_signature_type, signature_type_from_db,
 };
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
@@ -365,8 +364,8 @@ pub(crate) async fn load_managed_wallet_signer(
         .with_chain_id(Some(POLYGON));
     drop(private_key);
 
-    let derived = normalize_wallet_address(&signer.address().to_string());
-    if derived != wallet.wallet_address {
+    let derived = WalletAddress::parse(&signer.address().to_string());
+    if derived.as_ref().map(WalletAddress::as_str) != Some(wallet.wallet_address.as_str()) {
         return Err("Stored key does not match the wallet address.".to_string());
     }
 
@@ -529,7 +528,7 @@ pub(crate) async fn handle_show_positions(
             let wallet = source_message
                 .and_then(|message| message.regular_message())
                 .and_then(|message| message.text())
-                .and_then(extract_wallet_address_from_text);
+                .and_then(|text| WalletAddress::extract(text).map(|address| address.to_string()));
             match wallet {
                 Some(wallet) => wallet,
                 None => {
@@ -789,8 +788,15 @@ pub(crate) async fn handle_auth_key_input(
         }
     };
 
-    let wallet_address = normalize_wallet_address(&signer.address().to_string());
-    let aad = crypto::build_aad(user_id, &wallet_address);
+    let wallet_address = match WalletAddress::parse(&signer.address().to_string()) {
+        Some(address) => address,
+        None => {
+            bot.send_message(msg.chat.id, "Invalid private key format.")
+                .await?;
+            return Ok(());
+        }
+    };
+    let aad = crypto::build_aad(user_id, wallet_address.as_str());
     let (encrypted_key, nonce) =
         match crypto::encrypt(&encryption_key, private_key.as_bytes(), &aad) {
             Ok(payload) => payload,
@@ -808,7 +814,7 @@ pub(crate) async fn handle_auth_key_input(
     if let Err(_err) = db::set_managed_wallet(
         db,
         user_id,
-        &wallet_address,
+        wallet_address.as_str(),
         &encrypted_key,
         &nonce,
         None,
@@ -828,7 +834,7 @@ pub(crate) async fn handle_auth_key_input(
         db,
         user_id,
         Some(ACTION_MANAGE_AUTH_LABEL),
-        Some(&wallet_address),
+        Some(wallet_address.as_str()),
     )
     .await
     {
