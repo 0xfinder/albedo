@@ -37,13 +37,13 @@ use super::manage::{
     set_managed_wallet_type,
 };
 use super::menus::{
-    HELP_TEXT, cancel_menu_markup, label_menu_markup, main_menu_markup, manage_cancel_menu_markup,
+    HELP_TEXT, cancel_menu_markup, main_menu_markup, manage_cancel_menu_markup,
     manage_label_menu_markup, manage_menu_markup, manage_wallet_type_change_markup,
     manage_wallet_type_setup_markup, send_callback_menu, send_track_menu, track_menu_markup,
 };
 use super::parse::{
-    is_valid_wallet_address, normalize_wallet_address, parse_decimal, parse_incoming_command,
-    parse_side, parse_signature_type, parse_token_id,
+    normalize_wallet_address, parse_decimal, parse_incoming_command, parse_side,
+    parse_signature_type, parse_token_id,
 };
 use super::track::{finalize_track_add, send_tracked_wallets};
 
@@ -709,94 +709,13 @@ async fn handle_pending_action(
 ) -> ResponseResult<()> {
     match action {
         ACTION_TRACK_ADD_ADDRESS => {
-            if !is_valid_wallet_address(input) {
-                bot.send_message(
-                    msg.chat.id,
-                    "That wallet address looks invalid. Expected 0x + 40 hex characters.",
-                )
-                .await?;
-                return Ok(());
-            }
-
-            let wallet_address = normalize_wallet_address(input);
-            if let Err(_err) = db::set_pending_state(
-                db,
-                user_id,
-                Some(ACTION_TRACK_ADD_LABEL),
-                Some(&wallet_address),
-            )
-            .await
-            {
-                bot.send_message(
-                    msg.chat.id,
-                    "Sorry, I couldn't continue that request. Try again soon.",
-                )
-                .await?;
-                return Ok(());
-            }
-            bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
-                .reply_markup(label_menu_markup())
-                .await?;
+            super::track::handle_address_input(&bot, &msg, db, user_id, input).await?;
         }
         ACTION_TRACK_ADD_LABEL => {
-            let Some(wallet_address) = data else {
-                log_db_error(
-                    db::clear_pending_state(db, user_id).await,
-                    "clear_pending_state",
-                    user_id,
-                );
-                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-                return Ok(());
-            };
-
-            let label = input.trim();
-            if label.is_empty() {
-                bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
-                    .reply_markup(label_menu_markup())
-                    .await?;
-                return Ok(());
-            }
-
-            finalize_track_add(&bot, msg.chat.id, db, user_id, wallet_address, Some(label)).await?;
+            super::track::handle_label_input(&bot, &msg, db, user_id, data, input).await?;
         }
         ACTION_TRACK_REMOVE => {
-            if !is_valid_wallet_address(input) {
-                bot.send_message(
-                    msg.chat.id,
-                    "That wallet address looks invalid. Expected 0x + 40 hex characters.",
-                )
-                .await?;
-                return Ok(());
-            }
-
-            let wallet_address = normalize_wallet_address(input);
-            let removed = match db::remove_tracked_wallet(db, user_id, &wallet_address).await {
-                Ok(removed) => removed,
-                Err(_err) => {
-                    bot.send_message(
-                        msg.chat.id,
-                        "Sorry, I couldn't remove that wallet. Try again soon.",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            };
-
-            log_db_error(
-                db::clear_pending_state(db, user_id).await,
-                "clear_pending_state",
-                user_id,
-            );
-
-            if removed {
-                bot.send_message(msg.chat.id, format!("Stopped tracking {wallet_address}."))
-                    .await?;
-            } else {
-                bot.send_message(msg.chat.id, "That wallet is not being tracked.")
-                    .await?;
-            }
-
-            send_track_menu(&bot, msg.chat.id).await?;
+            super::track::handle_remove_input(&bot, &msg, db, user_id, input).await?;
         }
         ACTION_MANAGE_AUTH_KEY => {
             // The key transited Telegram in plaintext. If we cannot remove

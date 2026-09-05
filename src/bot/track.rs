@@ -4,9 +4,11 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 
-use super::common::log_db_error;
-use super::menus::send_track_menu;
-use super::parse::html_escape;
+use super::common::{
+    ACTION_TRACK_ADD_LABEL, MSG_ACTION_EXPIRED, MSG_SEND_LABEL_SKIP, log_db_error,
+};
+use super::menus::{label_menu_markup, send_track_menu};
+use super::parse::{html_escape, is_valid_wallet_address, normalize_wallet_address};
 use crate::db::{self, Db};
 
 pub(crate) async fn finalize_track_add(
@@ -98,5 +100,120 @@ pub(crate) async fn send_tracked_wallets(
             show_above_text: false,
         })
         .await?;
+    Ok(())
+}
+
+pub(crate) async fn handle_address_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    input: &str,
+) -> ResponseResult<()> {
+    if !is_valid_wallet_address(input) {
+        bot.send_message(
+            msg.chat.id,
+            "That wallet address looks invalid. Expected 0x + 40 hex characters.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let wallet_address = normalize_wallet_address(input);
+    if let Err(_err) = db::set_pending_state(
+        db,
+        user_id,
+        Some(ACTION_TRACK_ADD_LABEL),
+        Some(&wallet_address),
+    )
+    .await
+    {
+        bot.send_message(
+            msg.chat.id,
+            "Sorry, I couldn't continue that request. Try again soon.",
+        )
+        .await?;
+        return Ok(());
+    }
+    bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
+        .reply_markup(label_menu_markup())
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn handle_label_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    data: Option<&str>,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(wallet_address) = data else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+
+    let label = input.trim();
+    if label.is_empty() {
+        bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
+            .reply_markup(label_menu_markup())
+            .await?;
+        return Ok(());
+    }
+
+    finalize_track_add(&bot, msg.chat.id, db, user_id, wallet_address, Some(label)).await?;
+    Ok(())
+}
+
+pub(crate) async fn handle_remove_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    input: &str,
+) -> ResponseResult<()> {
+    if !is_valid_wallet_address(input) {
+        bot.send_message(
+            msg.chat.id,
+            "That wallet address looks invalid. Expected 0x + 40 hex characters.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let wallet_address = normalize_wallet_address(input);
+    let removed = match db::remove_tracked_wallet(db, user_id, &wallet_address).await {
+        Ok(removed) => removed,
+        Err(_err) => {
+            bot.send_message(
+                msg.chat.id,
+                "Sorry, I couldn't remove that wallet. Try again soon.",
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
+
+    if removed {
+        bot.send_message(msg.chat.id, format!("Stopped tracking {wallet_address}."))
+            .await?;
+    } else {
+        bot.send_message(msg.chat.id, "That wallet is not being tracked.")
+            .await?;
+    }
+
+    send_track_menu(&bot, msg.chat.id).await?;
     Ok(())
 }
