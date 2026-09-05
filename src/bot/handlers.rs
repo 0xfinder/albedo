@@ -47,6 +47,18 @@ const ACTION_MANAGE_CANCEL_ORDER: &str = "manage_cancel_order";
 const ACTION_COPY_TRADE_EDIT_PRICE: &str = "copy_trade_edit_price";
 const ACTION_COPY_TRADE_EDIT_SIZE: &str = "copy_trade_edit_size";
 
+const MSG_ACTION_EXPIRED: &str = "That action expired. Use /start to open the menu.";
+const MSG_SEND_LABEL_SKIP: &str = "Send a label for this wallet, or tap Skip.";
+const MSG_WALLET_LOAD_FAILED: &str = "Sorry, I couldn't load your managed wallet.";
+
+fn callback_chat_id(query: &CallbackQuery) -> ChatId {
+    query
+        .message
+        .as_ref()
+        .map(|message| message.chat().id)
+        .unwrap_or(ChatId(query.from.id.0 as i64))
+}
+
 pub async fn handle_message(
     bot: Bot,
     msg: Message,
@@ -241,21 +253,13 @@ pub async fn handle_callback(
         }
         "manage:list" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             send_managed_wallet(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:positions" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             send_managed_positions(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
@@ -294,21 +298,13 @@ pub async fn handle_callback(
         }
         "manage:remove" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             prompt_managed_wallet_removal(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:remove_confirm" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             confirm_managed_wallet_removal(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
@@ -324,21 +320,13 @@ pub async fn handle_callback(
         }
         "manage:change_type_eoa" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Eoa).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:change_type_proxy" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Proxy).await?;
             bot.answer_callback_query(query.id).await?;
         }
@@ -364,20 +352,12 @@ pub async fn handle_callback(
         }
         "track:list" => {
             let _ = db::clear_pending_state(&db, user_id).await;
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             send_tracked_wallets(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "track:skip_label" => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             match db::get_pending_state(&db, user_id).await {
                 Ok((Some(action), data)) if action == ACTION_TRACK_ADD_LABEL => {
                     if let Some(wallet_address) = data {
@@ -400,11 +380,7 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         "manage:skip_label" => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             match db::get_pending_state(&db, user_id).await {
                 Ok((Some(action), data)) if action == ACTION_MANAGE_AUTH_LABEL => {
                     if let Some(wallet_address) = data {
@@ -447,11 +423,7 @@ pub async fn handle_callback(
             .await?;
         }
         data if data.starts_with("sp:") => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             if let Some(id_str) = data.strip_prefix("sp:") {
                 bot.answer_callback_query(query.id).await?;
                 if let Ok(cb_id) = id_str.parse::<i64>() {
@@ -468,11 +440,7 @@ pub async fn handle_callback(
             }
         }
         data if data.starts_with("ct:") => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             if let Some(id_str) = data.strip_prefix("ct:") {
                 if let Ok(cb_id) = id_str.parse::<i64>() {
                     handle_copy_trade_init(&bot, chat_id, &db, user_id, cb_id).await?;
@@ -481,11 +449,7 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_confirm:") => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             if let Some(id_str) = data.strip_prefix("ct_confirm:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
                     handle_copy_trade_confirm(
@@ -502,11 +466,7 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_cancel:") => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             if let Some(id_str) = data.strip_prefix("ct_cancel:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
                     if load_owned_copy_trade_state(&bot, chat_id, &db, user_id, ct_id)
@@ -522,11 +482,7 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_flip:") => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             if let Some(id_str) = data.strip_prefix("ct_flip:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
                     handle_copy_trade_flip(&bot, chat_id, &db, user_id, ct_id, &query).await?;
@@ -535,11 +491,7 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_market:") => {
-            let chat_id = query
-                .message
-                .as_ref()
-                .map(|message| message.chat().id)
-                .unwrap_or(ChatId(query.from.id.0 as i64));
+            let chat_id = callback_chat_id(&query);
             if let Some(id_str) = data.strip_prefix("ct_market:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
                     handle_copy_trade_toggle_type(&bot, chat_id, &db, user_id, ct_id, &query)
@@ -558,11 +510,7 @@ pub async fn handle_callback(
                         Some(&ct_id.to_string()),
                     )
                     .await;
-                    let chat_id = query
-                        .message
-                        .as_ref()
-                        .map(|message| message.chat().id)
-                        .unwrap_or(ChatId(query.from.id.0 as i64));
+                    let chat_id = callback_chat_id(&query);
                     bot.send_message(chat_id, "Send the new price (e.g., 0.47):")
                         .await?;
                 }
@@ -579,11 +527,7 @@ pub async fn handle_callback(
                         Some(&ct_id.to_string()),
                     )
                     .await;
-                    let chat_id = query
-                        .message
-                        .as_ref()
-                        .map(|message| message.chat().id)
-                        .unwrap_or(ChatId(query.from.id.0 as i64));
+                    let chat_id = callback_chat_id(&query);
                     bot.send_message(chat_id, "Send the new size (number of shares):")
                         .await?;
                 }
@@ -682,24 +626,20 @@ async fn handle_pending_action(
                 .await?;
                 return Ok(());
             }
-            bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
+            bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
                 .reply_markup(label_menu_markup())
                 .await?;
         }
         ACTION_TRACK_ADD_LABEL => {
             let Some(wallet_address) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(
-                    msg.chat.id,
-                    "That action expired. Use /start to open the menu.",
-                )
-                .await?;
+                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
 
             let label = input.trim();
             if label.is_empty() {
-                bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
+                bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
                     .reply_markup(label_menu_markup())
                     .await?;
                 return Ok(());
@@ -839,24 +779,20 @@ async fn handle_pending_action(
                 bot.send_message(msg.chat.id, format!("Wallet updated to {wallet_address}."))
                     .await?;
             }
-            bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
+            bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
                 .reply_markup(manage_label_menu_markup())
                 .await?;
         }
         ACTION_MANAGE_AUTH_LABEL => {
             let Some(wallet_address) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(
-                    msg.chat.id,
-                    "That action expired. Use /start to open the menu.",
-                )
-                .await?;
+                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
 
             let label = input.trim();
             if label.is_empty() {
-                bot.send_message(msg.chat.id, "Send a label for this wallet, or tap Skip.")
+                bot.send_message(msg.chat.id, MSG_SEND_LABEL_SKIP)
                     .reply_markup(manage_label_menu_markup())
                     .await?;
                 return Ok(());
@@ -1235,22 +1171,14 @@ async fn handle_pending_action(
         ACTION_COPY_TRADE_EDIT_PRICE => {
             let Some(ct_id_str) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(
-                    msg.chat.id,
-                    "That action expired. Use /start to open the menu.",
-                )
-                .await?;
+                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
             let ct_id = match ct_id_str.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = db::clear_pending_state(db, user_id).await;
-                    bot.send_message(
-                        msg.chat.id,
-                        "That action expired. Use /start to open the menu.",
-                    )
-                    .await?;
+                    bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                     return Ok(());
                 }
             };
@@ -1276,22 +1204,14 @@ async fn handle_pending_action(
         ACTION_COPY_TRADE_EDIT_SIZE => {
             let Some(ct_id_str) = data else {
                 let _ = db::clear_pending_state(db, user_id).await;
-                bot.send_message(
-                    msg.chat.id,
-                    "That action expired. Use /start to open the menu.",
-                )
-                .await?;
+                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
             let ct_id = match ct_id_str.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = db::clear_pending_state(db, user_id).await;
-                    bot.send_message(
-                        msg.chat.id,
-                        "That action expired. Use /start to open the menu.",
-                    )
-                    .await?;
+                    bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                     return Ok(());
                 }
             };
@@ -1316,11 +1236,7 @@ async fn handle_pending_action(
         }
         _ => {
             let _ = db::clear_pending_state(db, user_id).await;
-            bot.send_message(
-                msg.chat.id,
-                "That action expired. Use /start to open the menu.",
-            )
-            .await?;
+            bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
         }
     }
 
@@ -1631,8 +1547,7 @@ async fn send_managed_positions(
     let managed_wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(wallet) => wallet,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
-                .await?;
+            bot.send_message(chat_id, MSG_WALLET_LOAD_FAILED).await?;
             send_manage_menu(bot, chat_id).await?;
             return Ok(());
         }
@@ -1732,8 +1647,7 @@ async fn send_managed_wallet(
     let wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(wallet) => wallet,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
-                .await?;
+            bot.send_message(chat_id, MSG_WALLET_LOAD_FAILED).await?;
             return Ok(());
         }
     };
@@ -1774,8 +1688,7 @@ async fn set_managed_wallet_type(
     let wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(wallet) => wallet,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
-                .await?;
+            bot.send_message(chat_id, MSG_WALLET_LOAD_FAILED).await?;
             send_manage_menu(bot, chat_id).await?;
             return Ok(());
         }
@@ -1820,8 +1733,7 @@ async fn prompt_managed_wallet_removal(
     let wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(wallet) => wallet,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
-                .await?;
+            bot.send_message(chat_id, MSG_WALLET_LOAD_FAILED).await?;
             send_manage_menu(bot, chat_id).await?;
             return Ok(());
         }
@@ -1852,8 +1764,7 @@ async fn confirm_managed_wallet_removal(
     let wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(wallet) => wallet,
         Err(_err) => {
-            bot.send_message(chat_id, "Sorry, I couldn't load your managed wallet.")
-                .await?;
+            bot.send_message(chat_id, MSG_WALLET_LOAD_FAILED).await?;
             send_manage_menu(bot, chat_id).await?;
             return Ok(());
         }
@@ -1927,7 +1838,7 @@ async fn load_managed_wallet_signer(
     let wallet = match db::get_managed_wallet(db, user_id).await {
         Ok(Some(wallet)) => wallet,
         Ok(None) => return Err("No wallet setup. Use Setup wallet first.".to_string()),
-        Err(_) => return Err("Sorry, I couldn't load your managed wallet.".to_string()),
+        Err(_) => return Err(MSG_WALLET_LOAD_FAILED.to_string()),
     };
 
     let aad = crypto::build_aad(user_id, &wallet.wallet_address);
