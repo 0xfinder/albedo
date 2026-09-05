@@ -1197,7 +1197,7 @@ async fn handle_pending_action(
                 let _ = db::clear_pending_state(db, user_id).await;
                 return Ok(());
             }
-            let _ = db::update_copy_trade_field(db, ct_id, "price", price).await;
+            let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await;
             let _ = db::clear_pending_state(db, user_id).await;
             send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
         }
@@ -1230,7 +1230,7 @@ async fn handle_pending_action(
                 let _ = db::clear_pending_state(db, user_id).await;
                 return Ok(());
             }
-            let _ = db::update_copy_trade_field(db, ct_id, "size", size).await;
+            let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await;
             let _ = db::clear_pending_state(db, user_id).await;
             send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
         }
@@ -2414,7 +2414,7 @@ async fn handle_copy_trade_flip(
     };
 
     let new_side = if state.side == "Buy" { "Sell" } else { "Buy" };
-    let _ = db::update_copy_trade_field(db, ct_id, "side", new_side).await;
+    let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Side, new_side).await;
 
     let state = match db::get_copy_trade_state(db, ct_id).await {
         Ok(Some(state)) => state,
@@ -2452,7 +2452,7 @@ async fn handle_copy_trade_toggle_type(
     } else {
         "limit"
     };
-    let _ = db::update_copy_trade_field(db, ct_id, "order_type", new_type).await;
+    let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::OrderType, new_type).await;
 
     let state = match db::get_copy_trade_state(db, ct_id).await {
         Ok(Some(state)) => state,

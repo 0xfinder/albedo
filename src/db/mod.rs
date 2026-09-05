@@ -265,22 +265,32 @@ pub async fn remove_tracked_wallet(db: &Db, user_id: i64, wallet_address: &str) 
     Ok(result.rows_affected() > 0)
 }
 
+async fn update_tracked_wallet_hash(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    hash: Option<&str>,
+    column: &str,
+) -> Result<()> {
+    let query =
+        format!("UPDATE tracked_wallets SET {column} = ? WHERE user_id = ? AND wallet_address = ?");
+    sqlx::query(&query)
+        .bind(hash)
+        .bind(user_id)
+        .bind(wallet_address)
+        .execute(db)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn update_tracked_wallet_activity_hash(
     db: &Db,
     user_id: i64,
     wallet_address: &str,
     hash: Option<&str>,
 ) -> Result<()> {
-    sqlx::query(
-        "UPDATE tracked_wallets SET last_activity_hash = ? WHERE user_id = ? AND wallet_address = ?",
-    )
-    .bind(hash)
-    .bind(user_id)
-    .bind(wallet_address)
-    .execute(db)
-    .await?;
-
-    Ok(())
+    update_tracked_wallet_hash(db, user_id, wallet_address, hash, "last_activity_hash").await
 }
 
 pub async fn update_tracked_wallet_positions_hash(
@@ -289,16 +299,7 @@ pub async fn update_tracked_wallet_positions_hash(
     wallet_address: &str,
     hash: Option<&str>,
 ) -> Result<()> {
-    sqlx::query(
-        "UPDATE tracked_wallets SET last_positions_hash = ? WHERE user_id = ? AND wallet_address = ?",
-    )
-    .bind(hash)
-    .bind(user_id)
-    .bind(wallet_address)
-    .execute(db)
-    .await?;
-
-    Ok(())
+    update_tracked_wallet_hash(db, user_id, wallet_address, hash, "last_positions_hash").await
 }
 
 pub async fn insert_callback_data(
@@ -384,13 +385,24 @@ pub async fn get_copy_trade_state(db: &Db, id: i64) -> Result<Option<CopyTradeSt
     Ok(row)
 }
 
-pub async fn update_copy_trade_field(db: &Db, id: i64, field: &str, value: &str) -> Result<bool> {
+pub enum CopyTradeField {
+    Side,
+    Price,
+    Size,
+    OrderType,
+}
+
+pub async fn update_copy_trade_field(
+    db: &Db,
+    id: i64,
+    field: CopyTradeField,
+    value: &str,
+) -> Result<bool> {
     let query = match field {
-        "side" => "UPDATE copy_trade_state SET side = ? WHERE id = ?",
-        "price" => "UPDATE copy_trade_state SET price = ? WHERE id = ?",
-        "size" => "UPDATE copy_trade_state SET size = ? WHERE id = ?",
-        "order_type" => "UPDATE copy_trade_state SET order_type = ? WHERE id = ?",
-        _ => return Ok(false),
+        CopyTradeField::Side => "UPDATE copy_trade_state SET side = ? WHERE id = ?",
+        CopyTradeField::Price => "UPDATE copy_trade_state SET price = ? WHERE id = ?",
+        CopyTradeField::Size => "UPDATE copy_trade_state SET size = ? WHERE id = ?",
+        CopyTradeField::OrderType => "UPDATE copy_trade_state SET order_type = ? WHERE id = ?",
     };
     let result = sqlx::query(query).bind(value).bind(id).execute(db).await?;
 
@@ -627,7 +639,7 @@ mod tests {
         .await
         .expect("insert");
 
-        let updated = update_copy_trade_field(&db, id, "side", "Sell")
+        let updated = update_copy_trade_field(&db, id, CopyTradeField::Side, "Sell")
             .await
             .expect("update side");
         assert!(updated);
@@ -649,7 +661,7 @@ mod tests {
         .await
         .expect("insert");
 
-        let updated = update_copy_trade_field(&db, id, "price", "0.55")
+        let updated = update_copy_trade_field(&db, id, CopyTradeField::Price, "0.55")
             .await
             .expect("update price");
         assert!(updated);
@@ -671,7 +683,7 @@ mod tests {
         .await
         .expect("insert");
 
-        let updated = update_copy_trade_field(&db, id, "size", "200")
+        let updated = update_copy_trade_field(&db, id, CopyTradeField::Size, "200")
             .await
             .expect("update size");
         assert!(updated);
@@ -693,7 +705,7 @@ mod tests {
         .await
         .expect("insert");
 
-        let updated = update_copy_trade_field(&db, id, "order_type", "market")
+        let updated = update_copy_trade_field(&db, id, CopyTradeField::OrderType, "market")
             .await
             .expect("update order_type");
         assert!(updated);
@@ -706,18 +718,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_trade_state_update_invalid_field() {
-        let (db, user_id) = setup_db().await;
+    async fn copy_trade_state_update_nonexistent() {
+        let (db, _user_id) = setup_db().await;
 
-        let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
-        )
-        .await
-        .expect("insert");
-
-        let updated = update_copy_trade_field(&db, id, "invalid_field", "value")
+        let updated = update_copy_trade_field(&db, 99999, CopyTradeField::Side, "Sell")
             .await
-            .expect("update invalid field");
+            .expect("update nonexistent");
         assert!(!updated);
     }
 
