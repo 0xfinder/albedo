@@ -27,7 +27,10 @@ pub const VERSION: &str = env!("GIT_VERSION");
 async fn main() -> Result<()> {
     color_eyre::install()?;
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
         .init();
     tracing::info!(version = VERSION, "albedo starting");
 
