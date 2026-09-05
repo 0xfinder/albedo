@@ -24,9 +24,9 @@ use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
 use crate::db::{self, Db};
+use crate::state::AppState;
 use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
-use crate::utils::Allowlist;
 
 const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
@@ -34,25 +34,19 @@ const WS_BACKOFF_RESET_AFTER_SECS: u64 = 60;
 
 type MarketCache = Arc<Mutex<HashMap<String, MarketInfo>>>;
 
-pub fn spawn_data_polling(
-    bot: teloxide::prelude::Bot,
-    db: Db,
-    poll_interval: Duration,
-    copy_trade_enabled: bool,
-    allowed_telegram_ids: Allowlist,
-) -> Option<tokio::task::JoinHandle<()>> {
-    if poll_interval.is_zero() {
+pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
+    if state.config.data_poll_interval.is_zero() {
         return None;
     }
 
     Some(tokio::spawn(async move {
         let client = DataClient::default();
-        let mut interval = tokio::time::interval(poll_interval);
+        let mut interval = tokio::time::interval(state.config.data_poll_interval);
 
         loop {
             interval.tick().await;
 
-            let wallets = match db::list_tracked_wallets_with_users(&db).await {
+            let wallets = match db::list_tracked_wallets_with_users(&state.db).await {
                 Ok(wallets) => wallets,
                 Err(_) => continue,
             };
@@ -60,7 +54,11 @@ pub fn spawn_data_polling(
             for wallet in wallets {
                 // Revoked users must stop receiving notifications even though
                 // their tracked-wallet rows still exist.
-                if !allowed_telegram_ids.is_allowed(wallet.telegram_id) {
+                if !state
+                    .config
+                    .allowed_telegram_ids
+                    .is_allowed(wallet.telegram_id)
+                {
                     continue;
                 }
 
@@ -69,9 +67,16 @@ pub fn spawn_data_polling(
                     Err(_) => continue,
                 };
 
-                let _ =
-                    poll_activity(&bot, &client, &db, &wallet, address, copy_trade_enabled).await;
-                let _ = poll_positions(&bot, &client, &db, &wallet, address).await;
+                let _ = poll_activity(
+                    &state.bot,
+                    &client,
+                    &state.db,
+                    &wallet,
+                    address,
+                    state.config.copy_trade_enabled,
+                )
+                .await;
+                let _ = poll_positions(&state.bot, &client, &state.db, &wallet, address).await;
 
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
@@ -79,31 +84,30 @@ pub fn spawn_data_polling(
     }))
 }
 
-pub fn spawn_ws_user_events(
-    bot: teloxide::prelude::Bot,
-    db: Db,
-    encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Allowlist,
-) -> Option<tokio::task::JoinHandle<()>> {
-    if encryption_key.is_none() {
+pub fn spawn_ws_user_events(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
+    if state.config.encryption_key.is_none() {
         return None;
     }
 
     Some(tokio::spawn(async move {
-        if let Some(encryption_key) = encryption_key {
-            let wallets = match db::list_managed_wallets_with_users(&db).await {
+        if let Some(encryption_key) = state.config.encryption_key.clone() {
+            let wallets = match db::list_managed_wallets_with_users(&state.db).await {
                 Ok(wallets) => wallets,
                 Err(_) => return,
             };
 
             for wallet in wallets {
-                if !allowed_telegram_ids.is_allowed(wallet.telegram_id) {
+                if !state
+                    .config
+                    .allowed_telegram_ids
+                    .is_allowed(wallet.telegram_id)
+                {
                     continue;
                 }
 
                 let encryption_key = encryption_key.clone();
-                let db = db.clone();
-                let bot = bot.clone();
+                let db = state.db.clone();
+                let bot = state.bot.clone();
                 tokio::spawn(async move {
                     let _ = connect_user_events(wallet, db, bot, encryption_key).await;
                 });

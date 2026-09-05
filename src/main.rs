@@ -4,10 +4,15 @@ mod bot;
 mod config;
 mod db;
 mod monitoring;
+mod state;
 mod utils;
+
+use std::sync::Arc;
 
 use color_eyre::eyre::Result;
 use teloxide::prelude::*;
+
+use state::AppState;
 
 pub const VERSION: &str = env!("GIT_VERSION");
 
@@ -32,29 +37,18 @@ async fn main() -> Result<()> {
         );
     }
 
-    let _data_handle = monitoring::spawn_data_polling(
-        bot.clone(),
-        db.clone(),
-        config.data_poll_interval,
-        config.copy_trade_enabled,
-        config.allowed_telegram_ids.clone(),
-    );
-
-    let _ws_handle = monitoring::spawn_ws_user_events(
-        bot.clone(),
-        db.clone(),
-        config.encryption_key.clone(),
-        config.allowed_telegram_ids.clone(),
-    );
-
-    // Start bot dispatcher
-    bot::start(
+    let state = Arc::new(AppState {
         bot,
         db,
-        config.encryption_key.clone(),
-        config.allowed_telegram_ids,
-    )
-    .await?;
+        config: Arc::new(config),
+    });
+
+    let _data_handle = monitoring::spawn_data_polling(state.clone());
+
+    let _ws_handle = monitoring::spawn_ws_user_events(state.clone());
+
+    // Start bot dispatcher
+    bot::start(state).await?;
 
     Ok(())
 }

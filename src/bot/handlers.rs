@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
@@ -16,9 +16,9 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
 use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
+use crate::state::AppState;
 use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
-use crate::utils::Allowlist;
 use zeroize::Zeroizing;
 
 const HELP_TEXT: &str = "Available commands:\n\
@@ -62,11 +62,12 @@ fn callback_chat_id(query: &CallbackQuery) -> ChatId {
 pub async fn handle_message(
     bot: Bot,
     msg: Message,
-    db: Db,
+    state: Arc<AppState>,
     bot_name: String,
-    encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Allowlist,
 ) -> ResponseResult<()> {
+    let db = state.db.clone();
+    let encryption_key = state.config.encryption_key.clone();
+    let allowed_telegram_ids = &state.config.allowed_telegram_ids;
     if !msg.chat.is_private() {
         bot.send_message(
             msg.chat.id,
@@ -148,10 +149,11 @@ pub async fn handle_message(
 pub async fn handle_callback(
     bot: Bot,
     query: CallbackQuery,
-    db: Db,
-    encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Allowlist,
+    state: Arc<AppState>,
 ) -> ResponseResult<()> {
+    let db = state.db.clone();
+    let encryption_key = state.config.encryption_key.clone();
+    let allowed_telegram_ids = &state.config.allowed_telegram_ids;
     if let Some(message) = query.message.as_ref() {
         if !message.chat().is_private() {
             bot.answer_callback_query(query.id).await?;

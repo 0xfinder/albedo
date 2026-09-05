@@ -1,17 +1,14 @@
 pub mod handlers;
 
-use crate::db::Db;
-use crate::utils::crypto::EncryptionKey;
-use crate::utils::Allowlist;
+use std::sync::Arc;
+
 use teloxide::types::BotCommand;
 use teloxide::{dptree, prelude::*};
 
-pub async fn start(
-    bot: Bot,
-    db: Db,
-    encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Allowlist,
-) -> color_eyre::eyre::Result<()> {
+use crate::state::AppState;
+
+pub async fn start(state: Arc<AppState>) -> color_eyre::eyre::Result<()> {
+    let bot = state.bot.clone();
     let me = bot.get_me().await?;
     let bot_name = me.user.username.unwrap_or_default();
 
@@ -22,12 +19,7 @@ pub async fn start(
         .branch(Update::filter_callback_query().endpoint(handlers::handle_callback));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![
-            db,
-            bot_name,
-            encryption_key,
-            allowed_telegram_ids
-        ])
+        .dependencies(dptree::deps![state, bot_name])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
