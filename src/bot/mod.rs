@@ -2,6 +2,7 @@
 
 pub mod common;
 pub mod handlers;
+pub mod manage;
 pub mod menus;
 pub mod parse;
 pub mod track;
