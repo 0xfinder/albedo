@@ -74,6 +74,13 @@ fn callback_chat_id(query: &CallbackQuery) -> ChatId {
         .unwrap_or(ChatId(query.from.id.0 as i64))
 }
 
+/// Best-effort DB write: failures are logged with context instead of dropped.
+fn log_db_error<T>(result: color_eyre::eyre::Result<T>, op: &'static str, user_id: i64) {
+    if let Err(err) = result {
+        tracing::warn!(user_id, op, error = %err, "db write failed");
+    }
+}
+
 /// Handle an incoming private message: commands or pending-action input.
 pub async fn handle_message(
     bot: Bot,
@@ -131,7 +138,11 @@ pub async fn handle_message(
     };
 
     if let Some((command, _args)) = parse_incoming_command(text.as_str(), bot_name.as_str()) {
-        let _ = db::clear_pending_state(&db, user_id).await;
+        log_db_error(
+            db::clear_pending_state(&db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
         return handle_top_level_command(bot, msg, &db, user_id, command.as_str()).await;
     }
 
@@ -209,12 +220,24 @@ pub async fn handle_callback(
 
     match data.as_str() {
         "menu:main" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_callback_menu(&bot, &query, "What do you want to do?", main_menu_markup()).await?;
         }
         "menu:track" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
-            let _ = db::set_mode(&db, user_id, "track").await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
+            log_db_error(
+                db::set_mode(&db, user_id, "track").await,
+                "set_mode",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -224,8 +247,16 @@ pub async fn handle_callback(
             .await?;
         }
         "menu:manage" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
-            let _ = db::set_mode(&db, user_id, "manage").await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
+            log_db_error(
+                db::set_mode(&db, user_id, "manage").await,
+                "set_mode",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -235,7 +266,11 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:auth" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -271,13 +306,21 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:list" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             send_managed_wallet(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:positions" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             send_managed_positions(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
@@ -316,19 +359,31 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:remove" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             prompt_managed_wallet_removal(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:remove_confirm" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             confirm_managed_wallet_removal(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:wallet_type" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -338,19 +393,31 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:change_type_eoa" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Eoa).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "manage:change_type_proxy" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Proxy).await?;
             bot.answer_callback_query(query.id).await?;
         }
         "track:add" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_TRACK_ADD_ADDRESS), None).await;
+            log_db_error(
+                db::set_pending_state(&db, user_id, Some(ACTION_TRACK_ADD_ADDRESS), None).await,
+                "set_pending_state",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -360,7 +427,11 @@ pub async fn handle_callback(
             .await?;
         }
         "track:remove" => {
-            let _ = db::set_pending_state(&db, user_id, Some(ACTION_TRACK_REMOVE), None).await;
+            log_db_error(
+                db::set_pending_state(&db, user_id, Some(ACTION_TRACK_REMOVE), None).await,
+                "set_pending_state",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -370,7 +441,11 @@ pub async fn handle_callback(
             .await?;
         }
         "track:list" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             let chat_id = callback_chat_id(&query);
             send_tracked_wallets(&bot, chat_id, &db, user_id).await?;
             bot.answer_callback_query(query.id).await?;
@@ -383,12 +458,20 @@ pub async fn handle_callback(
                         finalize_track_add(&bot, chat_id, &db, user_id, &wallet_address, None)
                             .await?;
                     } else {
-                        let _ = db::clear_pending_state(&db, user_id).await;
+                        log_db_error(
+                            db::clear_pending_state(&db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
                         send_track_menu(&bot, chat_id).await?;
                     }
                 }
                 Ok(_) => {
-                    let _ = db::clear_pending_state(&db, user_id).await;
+                    log_db_error(
+                        db::clear_pending_state(&db, user_id).await,
+                        "clear_pending_state",
+                        user_id,
+                    );
                     send_track_menu(&bot, chat_id).await?;
                 }
                 Err(_err) => {
@@ -406,12 +489,20 @@ pub async fn handle_callback(
                         finalize_manage_label(&bot, chat_id, &db, user_id, &wallet_address, None)
                             .await?;
                     } else {
-                        let _ = db::clear_pending_state(&db, user_id).await;
+                        log_db_error(
+                            db::clear_pending_state(&db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
                         send_manage_menu(&bot, chat_id).await?;
                     }
                 }
                 Ok(_) => {
-                    let _ = db::clear_pending_state(&db, user_id).await;
+                    log_db_error(
+                        db::clear_pending_state(&db, user_id).await,
+                        "clear_pending_state",
+                        user_id,
+                    );
                     send_manage_menu(&bot, chat_id).await?;
                 }
                 Err(_err) => {
@@ -422,7 +513,11 @@ pub async fn handle_callback(
             bot.answer_callback_query(query.id).await?;
         }
         "action:cancel" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -432,7 +527,11 @@ pub async fn handle_callback(
             .await?;
         }
         "manage:cancel_action" => {
-            let _ = db::clear_pending_state(&db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_callback_menu(
                 &bot,
                 &query,
@@ -492,8 +591,16 @@ pub async fn handle_callback(
                         .await
                         .is_some()
                     {
-                        let _ = db::delete_copy_trade_state(&db, ct_id).await;
-                        let _ = db::clear_pending_state(&db, user_id).await;
+                        log_db_error(
+                            db::delete_copy_trade_state(&db, ct_id).await,
+                            "delete_copy_trade_state",
+                            user_id,
+                        );
+                        log_db_error(
+                            db::clear_pending_state(&db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
                         bot.send_message(chat_id, "Copy trade cancelled.").await?;
                     }
                 }
@@ -522,13 +629,17 @@ pub async fn handle_callback(
         data if data.starts_with("ct_price:") => {
             if let Some(id_str) = data.strip_prefix("ct_price:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
-                    let _ = db::set_pending_state(
-                        &db,
+                    log_db_error(
+                        db::set_pending_state(
+                            &db,
+                            user_id,
+                            Some(ACTION_COPY_TRADE_EDIT_PRICE),
+                            Some(&ct_id.to_string()),
+                        )
+                        .await,
+                        "set_pending_state",
                         user_id,
-                        Some(ACTION_COPY_TRADE_EDIT_PRICE),
-                        Some(&ct_id.to_string()),
-                    )
-                    .await;
+                    );
                     let chat_id = callback_chat_id(&query);
                     bot.send_message(chat_id, "Send the new price (e.g., 0.47):")
                         .await?;
@@ -539,13 +650,17 @@ pub async fn handle_callback(
         data if data.starts_with("ct_size:") => {
             if let Some(id_str) = data.strip_prefix("ct_size:") {
                 if let Ok(ct_id) = id_str.parse::<i64>() {
-                    let _ = db::set_pending_state(
-                        &db,
+                    log_db_error(
+                        db::set_pending_state(
+                            &db,
+                            user_id,
+                            Some(ACTION_COPY_TRADE_EDIT_SIZE),
+                            Some(&ct_id.to_string()),
+                        )
+                        .await,
+                        "set_pending_state",
                         user_id,
-                        Some(ACTION_COPY_TRADE_EDIT_SIZE),
-                        Some(&ct_id.to_string()),
-                    )
-                    .await;
+                    );
                     let chat_id = callback_chat_id(&query);
                     bot.send_message(chat_id, "Send the new size (number of shares):")
                         .await?;
@@ -575,11 +690,19 @@ async fn handle_top_level_command(
                 .await?;
         }
         "track" => {
-            let _ = db::set_mode(db, user_id, "track").await;
+            log_db_error(
+                db::set_mode(db, user_id, "track").await,
+                "set_mode",
+                user_id,
+            );
             send_track_menu(&bot, msg.chat.id).await?;
         }
         "manage" => {
-            let _ = db::set_mode(db, user_id, "manage").await;
+            log_db_error(
+                db::set_mode(db, user_id, "manage").await,
+                "set_mode",
+                user_id,
+            );
             bot.send_message(
                 msg.chat.id,
                 "Manage your trading wallet, orders, and positions.",
@@ -651,7 +774,11 @@ async fn handle_pending_action(
         }
         ACTION_TRACK_ADD_LABEL => {
             let Some(wallet_address) = data else {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
@@ -689,7 +816,11 @@ async fn handle_pending_action(
                 }
             };
 
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
 
             if removed {
                 bot.send_message(msg.chat.id, format!("Stopped tracking {wallet_address}."))
@@ -706,7 +837,11 @@ async fn handle_pending_action(
             // that message, refuse to store the key and tell the user to
             // consider it exposed.
             if bot.delete_message(msg.chat.id, msg.id).await.is_err() {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 bot.send_message(
                     msg.chat.id,
                     "⚠️ I couldn't delete your message, so I did <b>not</b> save this key.\n\
@@ -720,7 +855,11 @@ async fn handle_pending_action(
             }
 
             let Some(encryption_key) = encryption_key else {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 bot.send_message(msg.chat.id, "Set ENCRYPTION_KEY to store managed wallets.")
                     .await?;
                 send_manage_menu(&bot, msg.chat.id).await?;
@@ -804,7 +943,11 @@ async fn handle_pending_action(
         }
         ACTION_MANAGE_AUTH_LABEL => {
             let Some(wallet_address) = data else {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
@@ -821,7 +964,11 @@ async fn handle_pending_action(
                 .await?;
         }
         ACTION_MANAGE_POSITIONS => {
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_managed_positions(&bot, msg.chat.id, db, user_id).await?;
         }
         ACTION_MANAGE_MARKET_ORDER => {
@@ -886,7 +1033,11 @@ async fn handle_pending_action(
                     let message = format!("{err}");
                     if is_wallet_type_error(&message) {
                         send_wallet_type_error(&bot, msg.chat.id, "Order failed", &message).await?;
-                        let _ = db::clear_pending_state(db, user_id).await;
+                        log_db_error(
+                            db::clear_pending_state(db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
                         send_manage_menu(&bot, msg.chat.id).await?;
                     } else {
                         bot.send_message(
@@ -967,7 +1118,11 @@ async fn handle_pending_action(
                 bot.send_message(msg.chat.id, "Order rejected.").await?;
             }
 
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_manage_menu(&bot, msg.chat.id).await?;
         }
         ACTION_MANAGE_LIMIT_ORDER => {
@@ -1040,7 +1195,11 @@ async fn handle_pending_action(
                     let message = format!("{err}");
                     if is_wallet_type_error(&message) {
                         send_wallet_type_error(&bot, msg.chat.id, "Order failed", &message).await?;
-                        let _ = db::clear_pending_state(db, user_id).await;
+                        log_db_error(
+                            db::clear_pending_state(db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
                         send_manage_menu(&bot, msg.chat.id).await?;
                     } else {
                         bot.send_message(
@@ -1108,7 +1267,11 @@ async fn handle_pending_action(
                 bot.send_message(msg.chat.id, "Order rejected.").await?;
             }
 
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_manage_menu(&bot, msg.chat.id).await?;
         }
         ACTION_MANAGE_CANCEL_ORDER => {
@@ -1148,7 +1311,11 @@ async fn handle_pending_action(
                     if is_wallet_type_error(&message) {
                         send_wallet_type_error(&bot, msg.chat.id, "Cancel failed", &message)
                             .await?;
-                        let _ = db::clear_pending_state(db, user_id).await;
+                        log_db_error(
+                            db::clear_pending_state(db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
                         send_manage_menu(&bot, msg.chat.id).await?;
                     } else {
                         bot.send_message(
@@ -1184,19 +1351,31 @@ async fn handle_pending_action(
                 bot.send_message(msg.chat.id, "Cancel failed.").await?;
             }
 
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_manage_menu(&bot, msg.chat.id).await?;
         }
         ACTION_COPY_TRADE_EDIT_PRICE => {
             let Some(ct_id_str) = data else {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
             let ct_id = match ct_id_str.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
-                    let _ = db::clear_pending_state(db, user_id).await;
+                    log_db_error(
+                        db::clear_pending_state(db, user_id).await,
+                        "clear_pending_state",
+                        user_id,
+                    );
                     bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                     return Ok(());
                 }
@@ -1213,23 +1392,43 @@ async fn handle_pending_action(
                 .await
                 .is_none()
             {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 return Ok(());
             }
-            let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await;
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await,
+                "update_copy_trade_field",
+                user_id,
+            );
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
         }
         ACTION_COPY_TRADE_EDIT_SIZE => {
             let Some(ct_id_str) = data else {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                 return Ok(());
             };
             let ct_id = match ct_id_str.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
-                    let _ = db::clear_pending_state(db, user_id).await;
+                    log_db_error(
+                        db::clear_pending_state(db, user_id).await,
+                        "clear_pending_state",
+                        user_id,
+                    );
                     bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
                     return Ok(());
                 }
@@ -1246,15 +1445,31 @@ async fn handle_pending_action(
                 .await
                 .is_none()
             {
-                let _ = db::clear_pending_state(db, user_id).await;
+                log_db_error(
+                    db::clear_pending_state(db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
                 return Ok(());
             }
-            let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await;
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await,
+                "update_copy_trade_field",
+                user_id,
+            );
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
         }
         _ => {
-            let _ = db::clear_pending_state(db, user_id).await;
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
             bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
         }
     }
@@ -1479,7 +1694,11 @@ async fn finalize_track_add(
         }
     };
 
-    let _ = db::clear_pending_state(db, user_id).await;
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
 
     if inserted {
         let response = match label {
@@ -1841,7 +2060,11 @@ async fn finalize_manage_label(
         }
     }
 
-    let _ = db::clear_pending_state(db, user_id).await;
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
 
     let response = match label {
         Some(label) => format!("Managed wallet {wallet_address} saved as {label}."),
@@ -2438,7 +2661,11 @@ async fn handle_copy_trade_flip(
     };
 
     let new_side = if state.side == "Buy" { "Sell" } else { "Buy" };
-    let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Side, new_side).await;
+    log_db_error(
+        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Side, new_side).await,
+        "update_copy_trade_field",
+        user_id,
+    );
 
     let state = match db::get_copy_trade_state(db, ct_id).await {
         Ok(Some(state)) => state,
@@ -2476,7 +2703,11 @@ async fn handle_copy_trade_toggle_type(
     } else {
         "limit"
     };
-    let _ = db::update_copy_trade_field(db, ct_id, db::CopyTradeField::OrderType, new_type).await;
+    log_db_error(
+        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::OrderType, new_type).await,
+        "update_copy_trade_field",
+        user_id,
+    );
 
     let state = match db::get_copy_trade_state(db, ct_id).await {
         Ok(Some(state)) => state,
@@ -2555,7 +2786,11 @@ async fn handle_copy_trade_confirm(
                 bot.send_message(chat_id, "Could not authenticate wallet.")
                     .await?;
             }
-            let _ = db::delete_copy_trade_state(db, ct_id).await;
+            log_db_error(
+                db::delete_copy_trade_state(db, ct_id).await,
+                "delete_copy_trade_state",
+                user_id,
+            );
             return Ok(());
         }
     };
@@ -2678,8 +2913,16 @@ async fn handle_copy_trade_confirm(
         }
     }
 
-    let _ = db::delete_copy_trade_state(db, ct_id).await;
-    let _ = db::clear_pending_state(db, user_id).await;
+    log_db_error(
+        db::delete_copy_trade_state(db, ct_id).await,
+        "delete_copy_trade_state",
+        user_id,
+    );
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
 
     Ok(())
 }
