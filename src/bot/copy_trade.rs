@@ -151,14 +151,16 @@ pub(crate) async fn handle_copy_trade_init(
 
     let ct_id = match db::insert_copy_trade_state(
         db,
-        user_id,
-        token_id,
-        side,
-        price,
-        size,
-        "limit",
-        cb_data.market_title.as_deref(),
-        cb_data.outcome.as_deref(),
+        db::NewCopyTrade {
+            user_id,
+            token_id,
+            side,
+            price,
+            size,
+            order_type: "limit",
+            market_title: cb_data.market_title.as_deref(),
+            outcome: cb_data.outcome.as_deref(),
+        },
     )
     .await
     {

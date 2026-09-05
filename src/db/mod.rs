@@ -401,36 +401,40 @@ pub async fn update_tracked_wallet_positions_hash(
     update_tracked_wallet_hash(db, user_id, wallet_address, hash, "last_positions_hash").await
 }
 
+/// Named parameters for [`insert_callback_data`]; fields are named so call
+/// sites cannot swap the positional `Option<&str>` arguments.
+#[derive(Debug)]
+pub struct NewCallbackData<'a> {
+    pub user_id: i64,
+    pub wallet_address: &'a str,
+    pub condition_id: &'a str,
+    pub token_id: Option<&'a str>,
+    pub side: Option<&'a str>,
+    pub price: Option<&'a str>,
+    pub size: Option<&'a str>,
+    pub market_title: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+}
+
 /// Persist an inline-button payload, returning its row id for callbacks.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn insert_callback_data(
-    db: &Db,
-    user_id: i64,
-    wallet_address: &str,
-    condition_id: &str,
-    token_id: Option<&str>,
-    side: Option<&str>,
-    price: Option<&str>,
-    size: Option<&str>,
-    market_title: Option<&str>,
-    outcome: Option<&str>,
-) -> Result<i64> {
+pub async fn insert_callback_data(db: &Db, data: NewCallbackData<'_>) -> Result<i64> {
     let result = sqlx::query(
         "INSERT INTO callback_data (user_id, wallet_address, condition_id, token_id, side, price, size, market_title, outcome) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(user_id)
-    .bind(wallet_address)
-    .bind(condition_id)
-    .bind(token_id)
-    .bind(side)
-    .bind(price)
-    .bind(size)
-    .bind(market_title)
-    .bind(outcome)
+    .bind(data.user_id)
+    .bind(data.wallet_address)
+    .bind(data.condition_id)
+    .bind(data.token_id)
+    .bind(data.side)
+    .bind(data.price)
+    .bind(data.size)
+    .bind(data.market_title)
+    .bind(data.outcome)
     .execute(db)
     .await?;
 
@@ -453,34 +457,37 @@ pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<CallbackData>>
     Ok(row)
 }
 
+/// Named parameters for [`insert_copy_trade_state`].
+#[derive(Debug)]
+pub struct NewCopyTrade<'a> {
+    pub user_id: i64,
+    pub token_id: &'a str,
+    pub side: &'a str,
+    pub price: &'a str,
+    pub size: &'a str,
+    pub order_type: &'a str,
+    pub market_title: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+}
+
 /// Persist an in-progress copy-trade draft, returning its row id.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn insert_copy_trade_state(
-    db: &Db,
-    user_id: i64,
-    token_id: &str,
-    side: &str,
-    price: &str,
-    size: &str,
-    order_type: &str,
-    market_title: Option<&str>,
-    outcome: Option<&str>,
-) -> Result<i64> {
+pub async fn insert_copy_trade_state(db: &Db, trade: NewCopyTrade<'_>) -> Result<i64> {
     let result = sqlx::query(
         "INSERT INTO copy_trade_state (user_id, token_id, side, price, size, order_type, market_title, outcome) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(user_id)
-    .bind(token_id)
-    .bind(side)
-    .bind(price)
-    .bind(size)
-    .bind(order_type)
-    .bind(market_title)
-    .bind(outcome)
+    .bind(trade.user_id)
+    .bind(trade.token_id)
+    .bind(trade.side)
+    .bind(trade.price)
+    .bind(trade.size)
+    .bind(trade.order_type)
+    .bind(trade.market_title)
+    .bind(trade.outcome)
     .execute(db)
     .await?;
 
@@ -655,7 +662,18 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_callback_data(
-            &db, user_id, "0xabc", "0xcond", None, None, None, None, None, None,
+            &db,
+            NewCallbackData {
+                user_id,
+                wallet_address: "0xabc",
+                condition_id: "0xcond",
+                token_id: None,
+                side: None,
+                price: None,
+                size: None,
+                market_title: None,
+                outcome: None,
+            },
         )
         .await
         .expect("insert callback_data");
@@ -678,15 +696,17 @@ mod tests {
 
         let id = insert_callback_data(
             &db,
-            user_id,
-            "0xabc",
-            "0xcond",
-            Some("12345"),
-            Some("Buy"),
-            Some("0.47"),
-            Some("100"),
-            Some("Team A vs B"),
-            Some("Team A"),
+            NewCallbackData {
+                user_id,
+                wallet_address: "0xabc",
+                condition_id: "0xcond",
+                token_id: Some("12345"),
+                side: Some("Buy"),
+                price: Some("0.47"),
+                size: Some("100"),
+                market_title: Some("Team A vs B"),
+                outcome: Some("Team A"),
+            },
         )
         .await
         .expect("insert callback_data");
@@ -721,14 +741,16 @@ mod tests {
 
         let id = insert_copy_trade_state(
             &db,
-            user_id,
-            "token123",
-            "Buy",
-            "0.47",
-            "100",
-            "limit",
-            Some("Team A vs B"),
-            Some("Team A"),
+            NewCopyTrade {
+                user_id,
+                token_id: "token123",
+                side: "Buy",
+                price: "0.47",
+                size: "100",
+                order_type: "limit",
+                market_title: Some("Team A vs B"),
+                outcome: Some("Team A"),
+            },
         )
         .await
         .expect("insert copy_trade_state");
@@ -764,7 +786,17 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+            &db,
+            NewCopyTrade {
+                user_id,
+                token_id: "token123",
+                side: "Buy",
+                price: "0.47",
+                size: "100",
+                order_type: "limit",
+                market_title: None,
+                outcome: None,
+            },
         )
         .await
         .expect("insert");
@@ -786,7 +818,17 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+            &db,
+            NewCopyTrade {
+                user_id,
+                token_id: "token123",
+                side: "Buy",
+                price: "0.47",
+                size: "100",
+                order_type: "limit",
+                market_title: None,
+                outcome: None,
+            },
         )
         .await
         .expect("insert");
@@ -808,7 +850,17 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+            &db,
+            NewCopyTrade {
+                user_id,
+                token_id: "token123",
+                side: "Buy",
+                price: "0.47",
+                size: "100",
+                order_type: "limit",
+                market_title: None,
+                outcome: None,
+            },
         )
         .await
         .expect("insert");
@@ -830,7 +882,17 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+            &db,
+            NewCopyTrade {
+                user_id,
+                token_id: "token123",
+                side: "Buy",
+                price: "0.47",
+                size: "100",
+                order_type: "limit",
+                market_title: None,
+                outcome: None,
+            },
         )
         .await
         .expect("insert");
@@ -862,7 +924,17 @@ mod tests {
         let (db, user_id) = setup_db().await;
 
         let id = insert_copy_trade_state(
-            &db, user_id, "token123", "Buy", "0.47", "100", "limit", None, None,
+            &db,
+            NewCopyTrade {
+                user_id,
+                token_id: "token123",
+                side: "Buy",
+                price: "0.47",
+                size: "100",
+                order_type: "limit",
+                market_title: None,
+                outcome: None,
+            },
         )
         .await
         .expect("insert");
@@ -909,35 +981,38 @@ pub async fn activity_log_exists(
     Ok(count > 0)
 }
 
+/// Named parameters for [`insert_activity_log`].
+#[derive(Debug)]
+pub struct NewActivityLog<'a> {
+    pub user_id: i64,
+    pub wallet_address: &'a str,
+    pub activity_type: &'a str,
+    pub market_slug: Option<&'a str>,
+    pub transaction_hash: &'a str,
+    pub activity_timestamp: i64,
+    pub details: Option<&'a str>,
+    pub notified: bool,
+}
+
 /// Record a delivered activity; `false` means it was already recorded.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn insert_activity_log(
-    db: &Db,
-    user_id: i64,
-    wallet_address: &str,
-    activity_type: &str,
-    market_slug: Option<&str>,
-    transaction_hash: &str,
-    activity_timestamp: i64,
-    details: Option<&str>,
-    notified: bool,
-) -> Result<bool> {
+pub async fn insert_activity_log(db: &Db, log: NewActivityLog<'_>) -> Result<bool> {
     let result = sqlx::query(
         "INSERT OR IGNORE INTO activity_log (user_id, wallet_address, activity_type, market_slug, \
          transaction_hash, activity_timestamp, details, notified) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(user_id)
-    .bind(wallet_address)
-    .bind(activity_type)
-    .bind(market_slug)
-    .bind(transaction_hash)
-    .bind(activity_timestamp)
-    .bind(details)
-    .bind(notified)
+    .bind(log.user_id)
+    .bind(log.wallet_address)
+    .bind(log.activity_type)
+    .bind(log.market_slug)
+    .bind(log.transaction_hash)
+    .bind(log.activity_timestamp)
+    .bind(log.details)
+    .bind(log.notified)
     .execute(db)
     .await?;
 

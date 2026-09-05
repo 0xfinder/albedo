@@ -574,15 +574,17 @@ async fn build_activity_keyboard(
         };
     let cb_id = db::insert_callback_data(
         db,
-        wallet.user_id,
-        &wallet.wallet_address,
-        condition_id,
-        trade_token,
-        trade_side,
-        trade_price,
-        trade_size,
-        Some(notification.market.as_str()),
-        notification.outcome.as_deref(),
+        db::NewCallbackData {
+            user_id: wallet.user_id,
+            wallet_address: &wallet.wallet_address,
+            condition_id,
+            token_id: trade_token,
+            side: trade_side,
+            price: trade_price,
+            size: trade_size,
+            market_title: Some(notification.market.as_str()),
+            outcome: notification.outcome.as_deref(),
+        },
     )
     .await
     .ok()?;
@@ -634,14 +636,16 @@ async fn record_activity_delivery(
 ) {
     if let Err(err) = db::insert_activity_log(
         db,
-        wallet.user_id,
-        &wallet.wallet_address,
-        &notification.activity_type,
-        notification.market_slug.as_deref(),
-        &notification.tx_hash,
-        notification.timestamp,
-        details,
-        true,
+        db::NewActivityLog {
+            user_id: wallet.user_id,
+            wallet_address: &wallet.wallet_address,
+            activity_type: &notification.activity_type,
+            market_slug: notification.market_slug.as_deref(),
+            transaction_hash: &notification.tx_hash,
+            activity_timestamp: notification.timestamp,
+            details,
+            notified: true,
+        },
     )
     .await
     {
@@ -1038,14 +1042,16 @@ async fn handle_ws_message(
             if let (Some(tx_hash), Some(timestamp)) = (tx_hash.as_deref(), timestamp) {
                 match db::insert_activity_log(
                     db,
-                    wallet.user_id,
-                    &wallet.wallet_address,
-                    "WS_TRADE",
-                    None,
-                    tx_hash,
-                    timestamp,
-                    None,
-                    true,
+                    db::NewActivityLog {
+                        user_id: wallet.user_id,
+                        wallet_address: &wallet.wallet_address,
+                        activity_type: "WS_TRADE",
+                        market_slug: None,
+                        transaction_hash: tx_hash,
+                        activity_timestamp: timestamp,
+                        details: None,
+                        notified: true,
+                    },
                 )
                 .await
                 {
