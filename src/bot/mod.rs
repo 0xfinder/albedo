@@ -5,6 +5,7 @@ pub mod copy_trade;
 pub mod handlers;
 pub mod manage;
 pub mod menus;
+pub mod orders;
 pub mod parse;
 pub mod track;
 

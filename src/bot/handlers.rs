@@ -727,15 +727,15 @@ async fn handle_pending_action(
             super::manage::handle_positions_input(&bot, &msg, db, user_id).await?
         }
         ACTION_MANAGE_MARKET_ORDER => {
-            super::manage::handle_market_order_input(&bot, &msg, db, user_id, input, encryption_key)
+            super::orders::handle_market_order_input(&bot, &msg, db, user_id, input, encryption_key)
                 .await?
         }
         ACTION_MANAGE_LIMIT_ORDER => {
-            super::manage::handle_limit_order_input(&bot, &msg, db, user_id, input, encryption_key)
+            super::orders::handle_limit_order_input(&bot, &msg, db, user_id, input, encryption_key)
                 .await?
         }
         ACTION_MANAGE_CANCEL_ORDER => {
-            super::manage::handle_cancel_order_input(&bot, &msg, db, user_id, input, encryption_key)
+            super::orders::handle_cancel_order_input(&bot, &msg, db, user_id, input, encryption_key)
                 .await?
         }
         ACTION_COPY_TRADE_EDIT_PRICE => {
