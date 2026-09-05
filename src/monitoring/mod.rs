@@ -15,7 +15,7 @@ use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::{
     ActivityRequest, PositionsRequest, TradesRequest,
 };
-use polymarket_client_sdk::data::types::response::Activity;
+use polymarket_client_sdk::data::types::response::{Activity, Position, Trade};
 use polymarket_client_sdk::types::{Address, B256, Decimal};
 use serde::Serialize;
 use std::collections::{HashMap, hash_map::DefaultHasher};
@@ -37,6 +37,71 @@ use crate::utils::number_format;
 const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
 const WS_BACKOFF_RESET_AFTER_SECS: u64 = 60;
+
+/// Source of Polymarket Data API reads. The SDK client serves production;
+/// tests substitute a fake, so polling logic is unit-testable without network.
+pub(crate) trait DataApi {
+    async fn fetch_activity(
+        &self,
+        request: &ActivityRequest,
+    ) -> color_eyre::eyre::Result<Vec<Activity>>;
+    async fn fetch_positions(
+        &self,
+        request: &PositionsRequest,
+    ) -> color_eyre::eyre::Result<Vec<Position>>;
+    async fn fetch_trades(&self, request: &TradesRequest) -> color_eyre::eyre::Result<Vec<Trade>>;
+}
+
+impl DataApi for DataClient {
+    async fn fetch_activity(
+        &self,
+        request: &ActivityRequest,
+    ) -> color_eyre::eyre::Result<Vec<Activity>> {
+        Ok(self.activity(request).await?)
+    }
+
+    async fn fetch_positions(
+        &self,
+        request: &PositionsRequest,
+    ) -> color_eyre::eyre::Result<Vec<Position>> {
+        Ok(self.positions(request).await?)
+    }
+
+    async fn fetch_trades(&self, request: &TradesRequest) -> color_eyre::eyre::Result<Vec<Trade>> {
+        Ok(self.trades(request).await?)
+    }
+}
+
+/// Telegram delivery. The real [`Bot`] sends; tests record into a fake.
+pub(crate) trait Notifier {
+    async fn notify(
+        &self,
+        chat_id: i64,
+        message: String,
+        markup: Option<InlineKeyboardMarkup>,
+    ) -> color_eyre::eyre::Result<()>;
+}
+
+impl Notifier for teloxide::prelude::Bot {
+    async fn notify(
+        &self,
+        chat_id: i64,
+        message: String,
+        markup: Option<InlineKeyboardMarkup>,
+    ) -> color_eyre::eyre::Result<()> {
+        let mut request = self
+            .send_message(teloxide::types::ChatId(chat_id), message)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .link_preview_options(no_preview_options());
+        if let Some(markup) = markup {
+            request = request.reply_markup(markup);
+        }
+        request
+            .await
+            .map(|_| ())
+            .map_err(|err| color_eyre::eyre::eyre!(err))
+    }
+}
 
 // Gap between wallets in one poll cycle; avoids bursting the Data API.
 const POLL_WALLET_GAP_MS: u64 = 200;
@@ -606,7 +671,7 @@ async fn build_activity_keyboard(
 async fn send_with_retry<F, Fut>(mut send: F, tx_hash: &str) -> bool
 where
     F: FnMut() -> Fut,
-    Fut: std::future::IntoFuture<Output = Result<teloxide::types::Message, teloxide::RequestError>>,
+    Fut: std::future::IntoFuture<Output = color_eyre::eyre::Result<()>>,
 {
     // Retry transient Telegram failures; on persistent failure the caller
     // stops and leaves the cursor so the next poll resumes here.
@@ -675,8 +740,8 @@ async fn record_activity_delivery(
 }
 
 async fn poll_activity(
-    bot: &teloxide::prelude::Bot,
-    client: &DataClient,
+    notifier: &impl Notifier,
+    client: &impl DataApi,
     db: &Db,
     wallet: &db::TrackedWalletWithUser,
     address: Address,
@@ -686,7 +751,7 @@ async fn poll_activity(
         .user(address)
         .limit(ACTIVITY_PAGE_LIMIT)?
         .build();
-    let activities = match client.activity(&request).await {
+    let activities = match client.fetch_activity(&request).await {
         Ok(activities) => activities,
         Err(err) => {
             tracing::warn!(
@@ -770,17 +835,14 @@ async fn poll_activity(
             wallet.label.as_deref(),
             &notification,
         );
-        let request = bot
-            .send_message(teloxide::types::ChatId(wallet.chat_id), message)
-            .parse_mode(teloxide::types::ParseMode::Html)
-            .link_preview_options(no_preview_options());
-        let request =
-            match build_activity_keyboard(db, wallet, &notification, copy_trade_enabled).await {
-                Some(markup) => request.reply_markup(markup),
-                None => request,
-            };
+        let markup = build_activity_keyboard(db, wallet, &notification, copy_trade_enabled).await;
 
-        if !send_with_retry(|| request.clone(), &notification.tx_hash).await {
+        if !send_with_retry(
+            || notifier.notify(wallet.chat_id, message.clone(), markup.clone()),
+            &notification.tx_hash,
+        )
+        .await
+        {
             return Ok(());
         }
 
@@ -799,7 +861,7 @@ async fn poll_activity(
 
 async fn poll_positions(
     _bot: &teloxide::prelude::Bot,
-    client: &DataClient,
+    client: &impl DataApi,
     db: &Db,
     wallet: &db::TrackedWalletWithUser,
     address: Address,
@@ -808,7 +870,7 @@ async fn poll_positions(
         .user(address)
         .limit(POSITIONS_PAGE_LIMIT)?
         .build();
-    let positions = match client.positions(&request).await {
+    let positions = match client.fetch_positions(&request).await {
         Ok(positions) => positions,
         Err(err) => {
             tracing::warn!(
@@ -1049,11 +1111,11 @@ fn format_activity_message(
 }
 
 async fn handle_ws_message(
-    bot: &teloxide::prelude::Bot,
+    notifier: &impl Notifier,
     db: &Db,
     wallet: &db::ManagedWalletWithUser,
     message: WsMessage,
-    data_client: &DataClient,
+    data_client: &impl DataApi,
     market_cache: &MarketCache,
 ) {
     let label = wallet
@@ -1100,10 +1162,7 @@ async fn handle_ws_message(
             }
 
             let message = format_ws_trade_message(label, &trade, &market_label);
-            if let Err(err) = bot
-                .send_message(teloxide::types::ChatId(wallet.chat_id), message)
-                .await
-            {
+            if let Err(err) = notifier.notify(wallet.chat_id, message, None).await {
                 tracing::warn!(
                     wallet = wallet.wallet_address.as_str(),
                     error = %err,
@@ -1114,10 +1173,7 @@ async fn handle_ws_message(
         WsMessage::Order(order) => {
             let market_label = resolve_market_label(data_client, market_cache, order.market).await;
             let message = format_ws_order_message(label, &order, &market_label);
-            if let Err(err) = bot
-                .send_message(teloxide::types::ChatId(wallet.chat_id), message)
-                .await
-            {
+            if let Err(err) = notifier.notify(wallet.chat_id, message, None).await {
                 tracing::warn!(
                     wallet = wallet.wallet_address.as_str(),
                     error = %err,
@@ -1129,7 +1185,7 @@ async fn handle_ws_message(
     }
 }
 
-async fn resolve_market_label(client: &DataClient, cache: &MarketCache, market: B256) -> String {
+async fn resolve_market_label(client: &impl DataApi, cache: &MarketCache, market: B256) -> String {
     if let Some(info) = lookup_market_info(client, cache, market).await {
         return format_market_label(&info);
     }
@@ -1138,7 +1194,7 @@ async fn resolve_market_label(client: &DataClient, cache: &MarketCache, market: 
 }
 
 async fn lookup_market_info(
-    client: &DataClient,
+    client: &impl DataApi,
     cache: &MarketCache,
     market: B256,
 ) -> Option<MarketInfo> {
@@ -1152,7 +1208,7 @@ async fn lookup_market_info(
         .limit(1)
         .ok()?;
     let request = builder.build();
-    let trades = client.trades(&request).await.ok()?;
+    let trades = client.fetch_trades(&request).await.ok()?;
     let trade = trades.first()?;
     let info = MarketInfo {
         title: trade.title.clone(),

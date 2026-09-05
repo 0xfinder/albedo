@@ -43,7 +43,7 @@ pub(crate) async fn send_manage_menu(bot: &Bot, chat_id: ChatId) -> ResponseResu
 
 pub(crate) async fn send_managed_positions(
     bot: &Bot,
-    client: &DataClient,
+    client: &impl crate::monitoring::DataApi,
     chat_id: ChatId,
     db: &Db,
     user_id: i64,
@@ -105,7 +105,7 @@ pub(crate) async fn send_managed_positions(
     };
     let request = builder.build();
 
-    let positions = match client.positions(&request).await {
+    let positions = match client.fetch_positions(&request).await {
         Ok(positions) => positions,
         Err(_) => {
             bot.send_message(chat_id, "Sorry, I couldn't fetch positions.")
@@ -506,7 +506,7 @@ pub(crate) fn build_directional_summary(positions: &[&Position]) -> Option<Strin
 
 pub(crate) async fn handle_show_positions(
     bot: &Bot,
-    client: &DataClient,
+    client: &impl crate::monitoring::DataApi,
     chat_id: ChatId,
     db: &Db,
     user_id: i64,
@@ -586,7 +586,7 @@ pub(crate) async fn handle_show_positions(
         }
     };
 
-    let positions = match client.positions(&request).await {
+    let positions = match client.fetch_positions(&request).await {
         Ok(positions) => positions,
         Err(_) => {
             bot.send_message(chat_id, "Could not fetch positions.")
