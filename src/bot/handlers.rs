@@ -23,7 +23,7 @@ use super::common::{
 
 use super::copy_trade::{
     handle_copy_trade_confirm, handle_copy_trade_flip, handle_copy_trade_init,
-    handle_copy_trade_toggle_type, load_owned_copy_trade_state, send_copy_trade_preview,
+    handle_copy_trade_toggle_type, load_owned_copy_trade_state,
 };
 use super::manage::{
     confirm_managed_wallet_removal, finalize_manage_label, handle_show_positions,
@@ -35,7 +35,7 @@ use super::menus::{
     manage_wallet_type_change_markup, manage_wallet_type_setup_markup, send_callback_menu,
     send_track_menu, track_menu_markup,
 };
-use super::parse::{parse_decimal, parse_incoming_command};
+use super::parse::parse_incoming_command;
 use super::track::{finalize_track_add, send_tracked_wallets};
 
 /// Handle an incoming private message: commands or pending-action input.
@@ -739,110 +739,10 @@ async fn handle_pending_action(
                 .await?
         }
         ACTION_COPY_TRADE_EDIT_PRICE => {
-            let Some(ct_id_str) = data else {
-                log_db_error(
-                    db::clear_pending_state(db, user_id).await,
-                    "clear_pending_state",
-                    user_id,
-                );
-                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-                return Ok(());
-            };
-            let ct_id = match ct_id_str.parse::<i64>() {
-                Ok(id) => id,
-                Err(_) => {
-                    log_db_error(
-                        db::clear_pending_state(db, user_id).await,
-                        "clear_pending_state",
-                        user_id,
-                    );
-                    bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-                    return Ok(());
-                }
-            };
-            let price = match parse_decimal(input) {
-                Some(_) => input.trim(),
-                None => {
-                    bot.send_message(msg.chat.id, "Price must be a decimal number (e.g., 0.47).")
-                        .await?;
-                    return Ok(());
-                }
-            };
-            if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
-                .await
-                .is_none()
-            {
-                log_db_error(
-                    db::clear_pending_state(db, user_id).await,
-                    "clear_pending_state",
-                    user_id,
-                );
-                return Ok(());
-            }
-            log_db_error(
-                db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await,
-                "update_copy_trade_field",
-                user_id,
-            );
-            log_db_error(
-                db::clear_pending_state(db, user_id).await,
-                "clear_pending_state",
-                user_id,
-            );
-            send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
+            super::copy_trade::handle_price_input(&bot, &msg, db, user_id, data, input).await?
         }
         ACTION_COPY_TRADE_EDIT_SIZE => {
-            let Some(ct_id_str) = data else {
-                log_db_error(
-                    db::clear_pending_state(db, user_id).await,
-                    "clear_pending_state",
-                    user_id,
-                );
-                bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-                return Ok(());
-            };
-            let ct_id = match ct_id_str.parse::<i64>() {
-                Ok(id) => id,
-                Err(_) => {
-                    log_db_error(
-                        db::clear_pending_state(db, user_id).await,
-                        "clear_pending_state",
-                        user_id,
-                    );
-                    bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-                    return Ok(());
-                }
-            };
-            let size = match parse_decimal(input) {
-                Some(_) => input.trim(),
-                None => {
-                    bot.send_message(msg.chat.id, "Size must be a number.")
-                        .await?;
-                    return Ok(());
-                }
-            };
-            if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
-                .await
-                .is_none()
-            {
-                log_db_error(
-                    db::clear_pending_state(db, user_id).await,
-                    "clear_pending_state",
-                    user_id,
-                );
-                return Ok(());
-            }
-            log_db_error(
-                db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await,
-                "update_copy_trade_field",
-                user_id,
-            );
-            log_db_error(
-                db::clear_pending_state(db, user_id).await,
-                "clear_pending_state",
-                user_id,
-            );
-            send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
+            super::copy_trade::handle_size_input(&bot, &msg, db, user_id, data, input).await?
         }
         _ => {
             log_db_error(

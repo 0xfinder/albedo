@@ -6,7 +6,7 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
-use super::common::log_db_error;
+use super::common::{MSG_ACTION_EXPIRED, log_db_error};
 use super::manage::{is_wallet_type_error, load_managed_wallet_signer, send_wallet_type_error};
 use super::parse::{format_decimal, html_escape, parse_decimal, parse_side, parse_token_id};
 use crate::db::{self, Db};
@@ -605,4 +605,128 @@ mod tests {
         assert!(data.contains(&"ct_price:99".to_string()));
         assert!(data.contains(&"ct_size:99".to_string()));
     }
+}
+
+pub(crate) async fn handle_price_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    data: Option<&str>,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(ct_id_str) = data else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+    let ct_id = match ct_id_str.parse::<i64>() {
+        Ok(id) => id,
+        Err(_) => {
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
+            bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+            return Ok(());
+        }
+    };
+    let price = match parse_decimal(input) {
+        Some(_) => input.trim(),
+        None => {
+            bot.send_message(msg.chat.id, "Price must be a decimal number (e.g., 0.47).")
+                .await?;
+            return Ok(());
+        }
+    };
+    if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
+        .await
+        .is_none()
+    {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        return Ok(());
+    }
+    log_db_error(
+        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await,
+        "update_copy_trade_field",
+        user_id,
+    );
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
+    send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
+    Ok(())
+}
+
+pub(crate) async fn handle_size_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    data: Option<&str>,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(ct_id_str) = data else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+    let ct_id = match ct_id_str.parse::<i64>() {
+        Ok(id) => id,
+        Err(_) => {
+            log_db_error(
+                db::clear_pending_state(db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
+            bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+            return Ok(());
+        }
+    };
+    let size = match parse_decimal(input) {
+        Some(_) => input.trim(),
+        None => {
+            bot.send_message(msg.chat.id, "Size must be a number.")
+                .await?;
+            return Ok(());
+        }
+    };
+    if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
+        .await
+        .is_none()
+    {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        return Ok(());
+    }
+    log_db_error(
+        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await,
+        "update_copy_trade_field",
+        user_id,
+    );
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
+    send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
+    Ok(())
 }
