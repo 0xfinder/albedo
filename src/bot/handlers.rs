@@ -12,12 +12,11 @@ use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::types::response::Position;
-use polymarket_client_sdk::types::{Address, B256, Decimal, U256};
+use polymarket_client_sdk::types::{Address, B256, Decimal};
 use polymarket_client_sdk::{POLYGON, derive_proxy_wallet};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
-use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
 use crate::state::AppState;
@@ -29,9 +28,9 @@ use super::common::{
     ACTION_COPY_TRADE_EDIT_PRICE, ACTION_COPY_TRADE_EDIT_SIZE, ACTION_MANAGE_AUTH_KEY,
     ACTION_MANAGE_AUTH_LABEL, ACTION_MANAGE_CANCEL_ORDER, ACTION_MANAGE_LIMIT_ORDER,
     ACTION_MANAGE_MARKET_ORDER, ACTION_MANAGE_POSITIONS, ACTION_TRACK_ADD_ADDRESS,
-    ACTION_TRACK_ADD_LABEL, ACTION_TRACK_REMOVE, EVM_ADDRESS_LEN, MSG_ACTION_EXPIRED,
-    MSG_SEND_LABEL_SKIP, MSG_WALLET_LOAD_FAILED, POSITIONS_DISPLAY_LIMIT, POSITIONS_PAGE_LIMIT,
-    SIG_EOA, SIG_PROXY, SIG_SAFE, callback_chat_id, data_client, log_db_error,
+    ACTION_TRACK_ADD_LABEL, ACTION_TRACK_REMOVE, MSG_ACTION_EXPIRED, MSG_SEND_LABEL_SKIP,
+    MSG_WALLET_LOAD_FAILED, POSITIONS_DISPLAY_LIMIT, POSITIONS_PAGE_LIMIT, SIG_EOA, SIG_PROXY,
+    callback_chat_id, data_client, log_db_error,
 };
 
 use super::menus::{
@@ -39,6 +38,12 @@ use super::menus::{
     manage_label_menu_markup, manage_menu_markup, manage_remove_confirm_markup,
     manage_wallet_type_change_markup, manage_wallet_type_prompt_markup,
     manage_wallet_type_setup_markup, send_callback_menu, send_track_menu, track_menu_markup,
+};
+use super::parse::{
+    extract_wallet_address_from_text, format_decimal, format_signature_type, format_signed_usd,
+    format_value_change, html_escape, is_valid_wallet_address, normalize_wallet_address,
+    parse_decimal, parse_incoming_command, parse_side, parse_signature_type, parse_token_id,
+    signature_type_from_db,
 };
 
 /// Handle an incoming private message: commands or pending-action input.
@@ -1437,41 +1442,6 @@ async fn handle_pending_action(
     Ok(())
 }
 
-fn normalize_wallet_address(raw: &str) -> String {
-    raw.trim().to_lowercase()
-}
-
-fn is_valid_wallet_address(raw: &str) -> bool {
-    let trimmed = raw.trim();
-    if !trimmed.starts_with("0x") {
-        return false;
-    }
-
-    if trimmed.len() != EVM_ADDRESS_LEN {
-        return false;
-    }
-
-    trimmed[2..].chars().all(|c| c.is_ascii_hexdigit())
-}
-
-fn parse_incoming_command(text: &str, bot_name: &str) -> Option<(String, Vec<String>)> {
-    if let Some((command, args)) = parse_command(text, bot_name) {
-        return Some((
-            command.to_lowercase(),
-            args.into_iter().map(str::to_string).collect(),
-        ));
-    }
-
-    let mut parts = text.split_whitespace();
-    let command = parts.next()?.to_lowercase();
-    let args: Vec<String> = parts.map(str::to_string).collect();
-
-    match command.as_str() {
-        "start" | "help" | "track" | "manage" | "version" => Some((command, args)),
-        _ => None,
-    }
-}
-
 async fn finalize_track_add(
     bot: &Bot,
     chat_id: ChatId,
@@ -1907,31 +1877,6 @@ async fn load_managed_wallet_signer(
     Ok((signer, signature_type))
 }
 
-fn parse_signature_type(data: Option<&str>) -> SignatureType {
-    match data {
-        Some(SIG_PROXY) => SignatureType::Proxy,
-        Some(SIG_SAFE) => SignatureType::GnosisSafe,
-        _ => SignatureType::Eoa,
-    }
-}
-
-fn signature_type_from_db(raw: i64) -> SignatureType {
-    match raw {
-        1 => SignatureType::Proxy,
-        2 => SignatureType::GnosisSafe,
-        _ => SignatureType::Eoa,
-    }
-}
-
-fn format_signature_type(signature_type: SignatureType) -> &'static str {
-    match signature_type {
-        SignatureType::Proxy => "Email/Google login (Magic)",
-        SignatureType::GnosisSafe => "Gnosis Safe",
-        SignatureType::Eoa => "Standard wallet (MetaMask/Ledger)",
-        _ => "Standard wallet (MetaMask/Ledger)",
-    }
-}
-
 fn is_wallet_type_error(message: &str) -> bool {
     let message = message.to_lowercase();
     message.contains("signature type")
@@ -1955,52 +1900,6 @@ async fn send_wallet_type_error(
     .reply_markup(manage_wallet_type_prompt_markup())
     .await?;
     Ok(())
-}
-
-fn parse_side(raw: &str) -> Option<Side> {
-    match raw.trim().to_lowercase().as_str() {
-        "buy" => Some(Side::Buy),
-        "sell" => Some(Side::Sell),
-        _ => None,
-    }
-}
-
-fn parse_token_id(raw: &str) -> Option<U256> {
-    U256::from_str(raw.trim()).ok()
-}
-
-fn parse_decimal(raw: &str) -> Option<Decimal> {
-    Decimal::from_str(raw.trim()).ok()
-}
-
-fn format_decimal(value: Decimal) -> String {
-    number_format::format_value(value)
-}
-
-fn format_signed_usd(value: Decimal) -> String {
-    let sign = if value < Decimal::ZERO { "-" } else { "+" };
-    let magnitude = if value < Decimal::ZERO { -value } else { value };
-    format!("{sign}{}", number_format::format_usd(magnitude))
-}
-
-fn format_signed_percent(value: Decimal) -> String {
-    format!("{:+.2}%", value.round_dp(2))
-}
-
-fn format_value_change(pnl: Decimal, cost: Decimal) -> String {
-    let pnl_display = format_signed_usd(pnl);
-    if cost > Decimal::ZERO {
-        let pnl_percent = (pnl / cost) * Decimal::from(100);
-        format!("({pnl_display}, {})", format_signed_percent(pnl_percent))
-    } else {
-        format!("({pnl_display}, N/A)")
-    }
-}
-
-fn html_escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn format_position_message(
@@ -2252,16 +2151,6 @@ async fn handle_show_positions(
         .await?;
 
     Ok(())
-}
-
-fn extract_wallet_address_from_text(text: &str) -> Option<String> {
-    text.split(|c: char| !(c.is_ascii_hexdigit() || c == 'x' || c == 'X'))
-        .find(|part| {
-            part.len() == EVM_ADDRESS_LEN
-                && (part.starts_with("0x") || part.starts_with("0X"))
-                && part[2..].chars().all(|c| c.is_ascii_hexdigit())
-        })
-        .map(|part| part.to_ascii_lowercase())
 }
 
 fn format_copy_trade_preview(state: &db::CopyTradeState) -> String {
@@ -2728,46 +2617,6 @@ async fn handle_copy_trade_confirm(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_signature_type_defaults_to_eoa() {
-        assert_eq!(parse_signature_type(None), SignatureType::Eoa);
-        assert_eq!(parse_signature_type(Some("unknown")), SignatureType::Eoa);
-    }
-
-    #[test]
-    fn parse_signature_type_maps_values() {
-        assert_eq!(parse_signature_type(Some(SIG_EOA)), SignatureType::Eoa);
-        assert_eq!(parse_signature_type(Some(SIG_PROXY)), SignatureType::Proxy);
-        assert_eq!(
-            parse_signature_type(Some("sig:2")),
-            SignatureType::GnosisSafe
-        );
-    }
-
-    #[test]
-    fn signature_type_from_db_maps_values() {
-        assert_eq!(signature_type_from_db(0), SignatureType::Eoa);
-        assert_eq!(signature_type_from_db(1), SignatureType::Proxy);
-        assert_eq!(signature_type_from_db(2), SignatureType::GnosisSafe);
-        assert_eq!(signature_type_from_db(99), SignatureType::Eoa);
-    }
-
-    #[test]
-    fn format_signature_type_is_user_friendly() {
-        assert_eq!(
-            format_signature_type(SignatureType::Eoa),
-            "Standard wallet (MetaMask/Ledger)"
-        );
-        assert_eq!(
-            format_signature_type(SignatureType::Proxy),
-            "Email/Google login (Magic)"
-        );
-        assert_eq!(
-            format_signature_type(SignatureType::GnosisSafe),
-            "Gnosis Safe"
-        );
-    }
 
     #[test]
     fn wallet_type_error_detection_matches_keywords() {
