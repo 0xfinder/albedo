@@ -51,6 +51,16 @@ const MSG_ACTION_EXPIRED: &str = "That action expired. Use /start to open the me
 const MSG_SEND_LABEL_SKIP: &str = "Send a label for this wallet, or tap Skip.";
 const MSG_WALLET_LOAD_FAILED: &str = "Sorry, I couldn't load your managed wallet.";
 
+// "0x" prefix plus 40 hex characters.
+const EVM_ADDRESS_LEN: usize = 42;
+// Pending-state encoding of SignatureType: Eoa is the default.
+const SIG_EOA: &str = "sig:0";
+const SIG_PROXY: &str = "sig:1";
+const SIG_SAFE: &str = "sig:2";
+// Cap positions shown to keep Telegram messages under the length limit.
+const POSITIONS_DISPLAY_LIMIT: usize = 8;
+const POSITIONS_PAGE_LIMIT: i32 = 200;
+
 fn callback_chat_id(query: &CallbackQuery) -> ChatId {
     query
         .message
@@ -229,7 +239,7 @@ pub async fn handle_callback(
         }
         "manage:auth_type_eoa" => {
             let _ =
-                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:0"))
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some(SIG_EOA))
                     .await;
             send_callback_menu(
                 &bot,
@@ -242,7 +252,7 @@ pub async fn handle_callback(
         }
         "manage:auth_type_proxy" => {
             let _ =
-                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some("sig:1"))
+                db::set_pending_state(&db, user_id, Some(ACTION_MANAGE_AUTH_KEY), Some(SIG_PROXY))
                     .await;
             send_callback_menu(
                 &bot,
@@ -1255,7 +1265,7 @@ fn is_valid_wallet_address(raw: &str) -> bool {
         return false;
     }
 
-    if trimmed.len() != 42 {
+    if trimmed.len() != EVM_ADDRESS_LEN {
         return false;
     }
 
@@ -1590,7 +1600,10 @@ async fn send_managed_positions(
     };
 
     let client = data_client();
-    let builder = match PositionsRequest::builder().user(address).limit(200) {
+    let builder = match PositionsRequest::builder()
+        .user(address)
+        .limit(POSITIONS_PAGE_LIMIT)
+    {
         Ok(builder) => builder,
         Err(_) => {
             bot.send_message(chat_id, "Sorry, I couldn't build that request.")
@@ -1620,7 +1633,7 @@ async fn send_managed_positions(
             .await?;
     } else {
         let mut lines = Vec::new();
-        for position in positions.iter().take(8) {
+        for position in positions.iter().take(POSITIONS_DISPLAY_LIMIT) {
             lines.push(format!(
                 "- {} ({}) size {} avg {}",
                 position.title,
@@ -1868,8 +1881,8 @@ async fn load_managed_wallet_signer(
 
 fn parse_signature_type(data: Option<&str>) -> SignatureType {
     match data {
-        Some("sig:1") => SignatureType::Proxy,
-        Some("sig:2") => SignatureType::GnosisSafe,
+        Some(SIG_PROXY) => SignatureType::Proxy,
+        Some(SIG_SAFE) => SignatureType::GnosisSafe,
         _ => SignatureType::Eoa,
     }
 }
@@ -2124,7 +2137,7 @@ async fn handle_show_positions(
             let builder = PositionsRequest::builder()
                 .user(address)
                 .filter(MarketFilter::markets([condition_id]))
-                .limit(200);
+                .limit(POSITIONS_PAGE_LIMIT);
             match builder {
                 Ok(builder) => builder.build(),
                 Err(_) => {
@@ -2135,7 +2148,9 @@ async fn handle_show_positions(
             }
         }
         None => {
-            let builder = PositionsRequest::builder().user(address).limit(200);
+            let builder = PositionsRequest::builder()
+                .user(address)
+                .limit(POSITIONS_PAGE_LIMIT);
             match builder {
                 Ok(builder) => builder.build(),
                 Err(_) => {
@@ -2214,7 +2229,7 @@ async fn handle_show_positions(
 fn extract_wallet_address_from_text(text: &str) -> Option<String> {
     text.split(|c: char| !(c.is_ascii_hexdigit() || c == 'x' || c == 'X'))
         .find(|part| {
-            part.len() == 42
+            part.len() == EVM_ADDRESS_LEN
                 && (part.starts_with("0x") || part.starts_with("0X"))
                 && part[2..].chars().all(|c| c.is_ascii_hexdigit())
         })
@@ -2674,8 +2689,8 @@ mod tests {
 
     #[test]
     fn parse_signature_type_maps_values() {
-        assert_eq!(parse_signature_type(Some("sig:0")), SignatureType::Eoa);
-        assert_eq!(parse_signature_type(Some("sig:1")), SignatureType::Proxy);
+        assert_eq!(parse_signature_type(Some(SIG_EOA)), SignatureType::Eoa);
+        assert_eq!(parse_signature_type(Some(SIG_PROXY)), SignatureType::Proxy);
         assert_eq!(
             parse_signature_type(Some("sig:2")),
             SignatureType::GnosisSafe

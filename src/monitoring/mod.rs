@@ -32,6 +32,15 @@ const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
 const WS_BACKOFF_RESET_AFTER_SECS: u64 = 60;
 
+// Gap between wallets in one poll cycle; avoids bursting the Data API.
+const POLL_WALLET_GAP_MS: u64 = 200;
+// Window for cursor diffing; larger windows cost more per poll.
+const ACTIVITY_PAGE_LIMIT: i32 = 500;
+const POSITIONS_PAGE_LIMIT: i32 = 200;
+// Transient Telegram failures retried with linear backoff; the caller holds
+// the cursor on persistent failure so the next poll resumes here.
+const TELEGRAM_SEND_MAX_ATTEMPTS: u64 = 3;
+
 type MarketCache = Arc<Mutex<HashMap<String, MarketInfo>>>;
 
 pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
@@ -78,7 +87,7 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
                 .await;
                 let _ = poll_positions(&state.bot, &client, &state.db, &wallet, address).await;
 
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                tokio::time::sleep(Duration::from_millis(POLL_WALLET_GAP_MS)).await;
             }
         }
     }))
@@ -544,7 +553,7 @@ where
 {
     // Retry transient Telegram failures; on persistent failure the caller
     // stops and leaves the cursor so the next poll resumes here.
-    for attempt in 0..3 {
+    for attempt in 0..TELEGRAM_SEND_MAX_ATTEMPTS {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
         }
@@ -614,7 +623,10 @@ async fn poll_activity(
     address: Address,
     copy_trade_enabled: bool,
 ) -> color_eyre::eyre::Result<()> {
-    let request = ActivityRequest::builder().user(address).limit(500)?.build();
+    let request = ActivityRequest::builder()
+        .user(address)
+        .limit(ACTIVITY_PAGE_LIMIT)?
+        .build();
     let activities = match client.activity(&request).await {
         Ok(activities) => activities,
         Err(_) => return Ok(()),
@@ -721,7 +733,7 @@ async fn poll_positions(
 ) -> color_eyre::eyre::Result<()> {
     let request = PositionsRequest::builder()
         .user(address)
-        .limit(200)?
+        .limit(POSITIONS_PAGE_LIMIT)?
         .build();
     let positions = match client.positions(&request).await {
         Ok(positions) => positions,

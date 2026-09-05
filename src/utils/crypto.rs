@@ -1,20 +1,26 @@
-use aes_gcm::aead::{rand_core::RngCore, Aead, KeyInit, OsRng, Payload};
+use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload, rand_core::RngCore};
 use aes_gcm::{Aes256Gcm, Nonce};
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result, eyre};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+// AES-256-GCM key and nonce sizes.
+pub const KEY_LEN: usize = 32;
+pub const KEY_HEX_LEN: usize = 64;
+pub const NONCE_LEN: usize = 12;
+
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
-pub struct EncryptionKey([u8; 32]);
+// No Debug: secret key material must never appear in logs.
+pub struct EncryptionKey([u8; KEY_LEN]);
 
 impl EncryptionKey {
     pub fn from_hex(raw: &str) -> Result<Self> {
         let trimmed = raw.trim();
         let trimmed = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-        if trimmed.len() != 64 {
+        if trimmed.len() != KEY_HEX_LEN {
             return Err(eyre!("ENCRYPTION_KEY must be 32 bytes (64 hex characters)"));
         }
 
-        let mut bytes = [0u8; 32];
+        let mut bytes = [0u8; KEY_LEN];
         for (idx, chunk) in trimmed.as_bytes().chunks(2).enumerate() {
             let pair = std::str::from_utf8(chunk)
                 .map_err(|_| eyre!("ENCRYPTION_KEY contains invalid hex characters"))?;
@@ -26,7 +32,7 @@ impl EncryptionKey {
         Ok(Self(bytes))
     }
 
-    pub fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_bytes(&self) -> &[u8; KEY_LEN] {
         &self.0
     }
 }
@@ -37,7 +43,7 @@ pub fn build_aad(user_id: i64, wallet_address: &str) -> Vec<u8> {
 
 pub fn encrypt(key: &EncryptionKey, plaintext: &[u8], aad: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).expect("key length is 32 bytes");
-    let mut nonce_bytes = [0u8; 12];
+    let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let payload = Payload {
@@ -56,7 +62,7 @@ pub fn decrypt(
     ciphertext: &[u8],
     aad: &[u8],
 ) -> Result<Vec<u8>> {
-    if nonce.len() != 12 {
+    if nonce.len() != NONCE_LEN {
         return Err(eyre!("invalid encryption nonce"));
     }
 
