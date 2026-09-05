@@ -2,6 +2,7 @@
 
 pub mod common;
 pub mod handlers;
+pub mod menus;
 
 use std::sync::Arc;
 
