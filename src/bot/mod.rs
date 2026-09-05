@@ -2,8 +2,8 @@ pub mod handlers;
 
 use std::sync::Arc;
 
+use teloxide::prelude::*;
 use teloxide::types::BotCommand;
-use teloxide::{dptree, prelude::*};
 
 use crate::state::AppState;
 

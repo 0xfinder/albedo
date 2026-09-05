@@ -2,17 +2,17 @@ use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
-use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
 use polymarket_client_sdk::clob::Client as ClobClient;
+use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
+use polymarket_client_sdk::data::Client as DataClient;
+use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::types::response::Position;
-use polymarket_client_sdk::data::types::MarketFilter;
-use polymarket_client_sdk::data::Client as DataClient;
-use polymarket_client_sdk::types::{Address, Decimal, B256, U256};
-use polymarket_client_sdk::{derive_proxy_wallet, POLYGON};
+use polymarket_client_sdk::types::{Address, B256, Decimal, U256};
+use polymarket_client_sdk::{POLYGON, derive_proxy_wallet};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 use teloxide::utils::command::parse_command;
 
 use crate::db::{self, Db};
