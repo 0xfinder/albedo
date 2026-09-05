@@ -4,12 +4,11 @@
 //! stored pending action or the callback payload.
 
 use std::str::FromStr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::types::{Amount, Side, SignatureType};
-use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::types::response::Position;
@@ -26,60 +25,21 @@ use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
 use zeroize::Zeroizing;
 
+use super::common::{
+    ACTION_COPY_TRADE_EDIT_PRICE, ACTION_COPY_TRADE_EDIT_SIZE, ACTION_MANAGE_AUTH_KEY,
+    ACTION_MANAGE_AUTH_LABEL, ACTION_MANAGE_CANCEL_ORDER, ACTION_MANAGE_LIMIT_ORDER,
+    ACTION_MANAGE_MARKET_ORDER, ACTION_MANAGE_POSITIONS, ACTION_TRACK_ADD_ADDRESS,
+    ACTION_TRACK_ADD_LABEL, ACTION_TRACK_REMOVE, EVM_ADDRESS_LEN, MSG_ACTION_EXPIRED,
+    MSG_SEND_LABEL_SKIP, MSG_WALLET_LOAD_FAILED, POSITIONS_DISPLAY_LIMIT, POSITIONS_PAGE_LIMIT,
+    SIG_EOA, SIG_PROXY, SIG_SAFE, callback_chat_id, data_client, log_db_error,
+};
+
 const HELP_TEXT: &str = "Available commands:\n\
 /start - Start the bot\n\
 /help - Show this help message\n\
 /track - Open the track menu\n\
 /manage - Open the manage menu\n\
 /version - Show the bot version";
-
-// Reuse one HTTP client (and its connection pool) across all requests instead
-// of paying a fresh TLS handshake per call.
-fn data_client() -> &'static DataClient {
-    static CLIENT: OnceLock<DataClient> = OnceLock::new();
-    CLIENT.get_or_init(DataClient::default)
-}
-
-const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
-const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
-const ACTION_TRACK_REMOVE: &str = "track_remove";
-const ACTION_MANAGE_AUTH_KEY: &str = "manage_auth_key";
-const ACTION_MANAGE_AUTH_LABEL: &str = "manage_auth_label";
-const ACTION_MANAGE_POSITIONS: &str = "manage_positions";
-const ACTION_MANAGE_MARKET_ORDER: &str = "manage_market_order";
-const ACTION_MANAGE_LIMIT_ORDER: &str = "manage_limit_order";
-const ACTION_MANAGE_CANCEL_ORDER: &str = "manage_cancel_order";
-const ACTION_COPY_TRADE_EDIT_PRICE: &str = "copy_trade_edit_price";
-const ACTION_COPY_TRADE_EDIT_SIZE: &str = "copy_trade_edit_size";
-
-const MSG_ACTION_EXPIRED: &str = "That action expired. Use /start to open the menu.";
-const MSG_SEND_LABEL_SKIP: &str = "Send a label for this wallet, or tap Skip.";
-const MSG_WALLET_LOAD_FAILED: &str = "Sorry, I couldn't load your managed wallet.";
-
-// "0x" prefix plus 40 hex characters.
-const EVM_ADDRESS_LEN: usize = 42;
-// Pending-state encoding of SignatureType: Eoa is the default.
-const SIG_EOA: &str = "sig:0";
-const SIG_PROXY: &str = "sig:1";
-const SIG_SAFE: &str = "sig:2";
-// Cap positions shown to keep Telegram messages under the length limit.
-const POSITIONS_DISPLAY_LIMIT: usize = 8;
-const POSITIONS_PAGE_LIMIT: i32 = 200;
-
-fn callback_chat_id(query: &CallbackQuery) -> ChatId {
-    query
-        .message
-        .as_ref()
-        .map(|message| message.chat().id)
-        .unwrap_or(ChatId(query.from.id.0 as i64))
-}
-
-/// Best-effort DB write: failures are logged with context instead of dropped.
-fn log_db_error<T>(result: color_eyre::eyre::Result<T>, op: &'static str, user_id: i64) {
-    if let Err(err) = result {
-        tracing::warn!(user_id, op, error = %err, "db write failed");
-    }
-}
 
 /// Handle an incoming private message: commands or pending-action input.
 pub async fn handle_message(

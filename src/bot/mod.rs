@@ -1,5 +1,6 @@
 //! Telegram dispatcher wiring: commands, handler endpoints, and shared state.
 
+pub mod common;
 pub mod handlers;
 
 use std::sync::Arc;
