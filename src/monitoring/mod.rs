@@ -509,33 +509,31 @@ mod tests {
     }
 
     #[test]
-    fn is_tradeable_activity_buy() {
-        assert!(is_tradeable_activity("Buy"));
+    fn activity_kind_classifies_trades() {
+        assert!(ActivityKind::parse("Buy").is_tradeable());
+        assert!(ActivityKind::parse("Sell").is_tradeable());
+        assert!(ActivityKind::parse("Trade").is_tradeable());
+        assert!(!ActivityKind::parse("Redeem").is_tradeable());
+        assert!(!ActivityKind::parse("Claim").is_tradeable());
+        assert!(!ActivityKind::parse("Reward").is_tradeable());
     }
 
     #[test]
-    fn is_tradeable_activity_sell() {
-        assert!(is_tradeable_activity("Sell"));
-    }
-
-    #[test]
-    fn is_tradeable_activity_trade() {
-        assert!(is_tradeable_activity("Trade"));
-    }
-
-    #[test]
-    fn is_tradeable_activity_redeem() {
-        assert!(!is_tradeable_activity("Redeem"));
-    }
-
-    #[test]
-    fn is_tradeable_activity_claim() {
-        assert!(!is_tradeable_activity("Claim"));
-    }
-
-    #[test]
-    fn is_tradeable_activity_reward() {
-        assert!(!is_tradeable_activity("Reward"));
+    fn activity_kind_normalizes_reward_spellings() {
+        for raw in [
+            "REFERRAL_REWARD",
+            "Unknown(\"REFERRAL_REWARD\")",
+            "MAKER_REBATE",
+            "MakerRebate",
+            "Unknown(\"MAKER_REBATE\")",
+            "TAKER_REBATE",
+            "TakerRebate",
+            "Unknown(\"TAKER_REBATE\")",
+        ] {
+            assert!(ActivityKind::parse(raw).is_reward(), "{raw}");
+        }
+        assert!(ActivityKind::parse("Redeem").is_closed());
+        assert!(!ActivityKind::parse("Buy").is_reward());
     }
 }
 
@@ -557,21 +555,20 @@ async fn build_activity_keyboard(
 ) -> Option<InlineKeyboardMarkup> {
     // Closed markets (Redeem/Claim) have no positions left to show,
     // so skip the button row entirely.
-    if is_closed_activity(&notification.activity_type) {
+    if notification.kind().is_closed() {
         return None;
     }
     let condition_id = notification.condition_id.as_deref()?;
-    let (trade_token, trade_side, trade_price, trade_size) =
-        if is_tradeable_activity(&notification.activity_type) {
-            (
-                notification.asset.as_deref(),
-                notification.side.as_deref(),
-                notification.price.as_deref(),
-                Some(notification.size.as_str()),
-            )
-        } else {
-            (None, None, None, None)
-        };
+    let (trade_token, trade_side, trade_price, trade_size) = if notification.kind().is_tradeable() {
+        (
+            notification.asset.as_deref(),
+            notification.side.as_deref(),
+            notification.price.as_deref(),
+            Some(notification.size.as_str()),
+        )
+    } else {
+        (None, None, None, None)
+    };
     let cb_id = db::insert_callback_data(
         db,
         db::NewCallbackData {
@@ -871,28 +868,51 @@ fn format_decimal(value: Decimal) -> String {
     number_format::format_value(value)
 }
 
-fn is_tradeable_activity(activity_type: &str) -> bool {
-    matches!(activity_type, "Buy" | "Sell" | "Trade")
+/// Normalized activity classification. The Data API spells reward payouts
+/// several ways (`MakerRebate` vs `MAKER_REBATE` vs `Unknown("MAKER_REBATE")`),
+/// so all matching lives here instead of scattered string comparisons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActivityKind {
+    Buy,
+    Sell,
+    Trade,
+    Closed,
+    ReferralReward,
+    MakerRebate,
+    TakerRebate,
+    Other,
 }
 
-// Reward/rebate payouts carry no market context, so their notifications
-// render a compact wallet + value layout instead of the trade fields.
-fn is_reward_activity(activity_type: &str) -> bool {
-    matches!(
-        activity_type,
-        "Unknown(\"REFERRAL_REWARD\")"
-            | "REFERRAL_REWARD"
-            | "Unknown(\"MAKER_REBATE\")"
-            | "MAKER_REBATE"
-            | "MakerRebate"
-            | "Unknown(\"TAKER_REBATE\")"
-            | "TAKER_REBATE"
-            | "TakerRebate"
-    )
-}
+impl ActivityKind {
+    fn parse(raw: &str) -> Self {
+        match raw {
+            "Buy" => Self::Buy,
+            "Sell" => Self::Sell,
+            "Trade" => Self::Trade,
+            "Redeem" | "Claim" => Self::Closed,
+            "Unknown(\"REFERRAL_REWARD\")" | "REFERRAL_REWARD" => Self::ReferralReward,
+            "Unknown(\"MAKER_REBATE\")" | "MAKER_REBATE" | "MakerRebate" => Self::MakerRebate,
+            "Unknown(\"TAKER_REBATE\")" | "TAKER_REBATE" | "TakerRebate" => Self::TakerRebate,
+            _ => Self::Other,
+        }
+    }
 
-fn is_closed_activity(activity_type: &str) -> bool {
-    matches!(activity_type, "Redeem" | "Claim")
+    fn is_tradeable(self) -> bool {
+        matches!(self, Self::Buy | Self::Sell | Self::Trade)
+    }
+
+    // Reward/rebate payouts carry no market context, so their notifications
+    // render a compact wallet + value layout instead of the trade fields.
+    fn is_reward(self) -> bool {
+        matches!(
+            self,
+            Self::ReferralReward | Self::MakerRebate | Self::TakerRebate
+        )
+    }
+
+    fn is_closed(self) -> bool {
+        matches!(self, Self::Closed)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -919,6 +939,9 @@ struct MarketInfo {
 }
 
 impl ActivityNotification {
+    fn kind(&self) -> ActivityKind {
+        ActivityKind::parse(&self.activity_type)
+    }
     fn from_activity(activity: &Activity) -> Self {
         let market = activity
             .title
@@ -949,20 +972,20 @@ fn format_activity_message(
     label: Option<&str>,
     notification: &ActivityNotification,
 ) -> String {
-    let reward = is_reward_activity(&notification.activity_type);
-    let (emoji, action) = match notification.activity_type.as_str() {
-        "Buy" => ("🟢", "BUY"),
-        "Sell" => ("🔴", "SELL"),
-        "Trade" => match notification.side.as_deref() {
+    let kind = notification.kind();
+    let (emoji, action): (&str, &str) = match kind {
+        ActivityKind::Buy => ("🟢", "BUY"),
+        ActivityKind::Sell => ("🔴", "SELL"),
+        ActivityKind::Trade => match notification.side.as_deref() {
             Some("Buy") => ("🟢", "BUY"),
             Some("Sell") => ("🔴", "SELL"),
             _ => ("📊", "TRADE"),
         },
-        "Redeem" | "Claim" => ("🟠", "CLOSED"),
-        "Unknown(\"REFERRAL_REWARD\")" | "REFERRAL_REWARD" => ("🎁", "REFERRAL REWARD"),
-        "Unknown(\"MAKER_REBATE\")" | "MAKER_REBATE" | "MakerRebate" => ("💰", "MAKER REBATE"),
-        "Unknown(\"TAKER_REBATE\")" | "TAKER_REBATE" | "TakerRebate" => ("💵", "TAKER REBATE"),
-        _ => ("📊", notification.activity_type.as_str()),
+        ActivityKind::Closed => ("🟠", "CLOSED"),
+        ActivityKind::ReferralReward => ("🎁", "REFERRAL REWARD"),
+        ActivityKind::MakerRebate => ("💰", "MAKER REBATE"),
+        ActivityKind::TakerRebate => ("💵", "TAKER REBATE"),
+        ActivityKind::Other => ("📊", notification.activity_type.as_str()),
     };
 
     let name_line = match (label, &notification.username) {
@@ -1001,7 +1024,7 @@ fn format_activity_message(
         .map(number_format::format_usd)
         .unwrap_or_else(|| format!("${}", notification.usdc_size));
 
-    if reward {
+    if kind.is_reward() {
         return format!(
             "{emoji} <b>{action}</b>\n\n\
             👛 Wallet: <code>{wallet_address}</code>{name_line}\n\
