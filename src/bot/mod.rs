@@ -1,6 +1,7 @@
 //! Telegram dispatcher wiring: commands, handler endpoints, and shared state.
 
 pub mod common;
+pub mod copy_trade;
 pub mod handlers;
 pub mod manage;
 pub mod menus;
