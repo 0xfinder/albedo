@@ -3,7 +3,7 @@
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 pub(crate) const HELP_TEXT: &str = "Available commands:
 \

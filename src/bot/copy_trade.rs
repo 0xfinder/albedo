@@ -4,7 +4,7 @@ use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::types::{Amount, Side};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
 use super::common::{MSG_ACTION_EXPIRED, log_db_error};
 use super::manage::{is_wallet_type_error, load_managed_wallet_signer, send_wallet_type_error};
