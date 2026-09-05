@@ -4,6 +4,7 @@ use std::env;
 use std::time::Duration;
 
 use crate::utils::crypto::EncryptionKey;
+use crate::utils::Allowlist;
 
 pub struct Config {
     pub telegram_token: String,
@@ -13,7 +14,7 @@ pub struct Config {
     pub copy_trade_enabled: bool,
     /// Telegram user IDs allowed to interact with the bot. Empty locks the
     /// bot down; there is no open-access mode.
-    pub allowed_telegram_ids: Vec<i64>,
+    pub allowed_telegram_ids: Allowlist,
 }
 
 impl Config {
@@ -49,11 +50,12 @@ fn parse_enabled_flag(raw: Option<String>) -> bool {
 
 // Fail closed: an unset or empty list locks the bot down entirely. Only
 // explicit IDs grant access.
-fn parse_allowed_telegram_ids(raw: Option<String>) -> Vec<i64> {
-    raw.unwrap_or_default()
-        .split(',')
-        .filter_map(|part| part.trim().parse::<i64>().ok())
-        .collect()
+fn parse_allowed_telegram_ids(raw: Option<String>) -> Allowlist {
+    Allowlist::from_ids(
+        raw.unwrap_or_default()
+            .split(',')
+            .filter_map(|part| part.trim().parse::<i64>().ok()),
+    )
 }
 
 fn parse_data_poll_interval(raw: Option<String>) -> Duration {
@@ -181,18 +183,19 @@ mod tests {
 
     #[test]
     fn parse_allowed_telegram_ids_parses_csv() {
-        assert_eq!(
-            parse_allowed_telegram_ids(Some("123, 456,789".to_string())),
-            vec![123, 456, 789],
-        );
+        let allowlist = parse_allowed_telegram_ids(Some("123, 456,789".to_string()));
+        assert!(allowlist.is_allowed(123));
+        assert!(allowlist.is_allowed(456));
+        assert!(allowlist.is_allowed(789));
+        assert!(!allowlist.is_allowed(999));
     }
 
     #[test]
     fn parse_allowed_telegram_ids_skips_invalid_entries() {
-        assert_eq!(
-            parse_allowed_telegram_ids(Some("123, abc, 456".to_string())),
-            vec![123, 456],
-        );
+        let allowlist = parse_allowed_telegram_ids(Some("123, abc, 456".to_string()));
+        assert!(allowlist.is_allowed(123));
+        assert!(allowlist.is_allowed(456));
+        assert!(!allowlist.is_allowed(789));
     }
 
     #[test]

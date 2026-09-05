@@ -18,7 +18,7 @@ use teloxide::utils::command::parse_command;
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
-use crate::utils::telegram_id_allowed;
+use crate::utils::Allowlist;
 use zeroize::Zeroizing;
 
 const HELP_TEXT: &str = "Available commands:\n\
@@ -65,7 +65,7 @@ pub async fn handle_message(
     db: Db,
     bot_name: String,
     encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Vec<i64>,
+    allowed_telegram_ids: Allowlist,
 ) -> ResponseResult<()> {
     if !msg.chat.is_private() {
         bot.send_message(
@@ -87,7 +87,7 @@ pub async fn handle_message(
         return Ok(());
     };
 
-    if !telegram_id_allowed(&allowed_telegram_ids, user.id.0 as i64) {
+    if !allowed_telegram_ids.is_allowed(user.id.0 as i64) {
         bot.send_message(
             msg.chat.id,
             format!(
@@ -150,7 +150,7 @@ pub async fn handle_callback(
     query: CallbackQuery,
     db: Db,
     encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Vec<i64>,
+    allowed_telegram_ids: Allowlist,
 ) -> ResponseResult<()> {
     if let Some(message) = query.message.as_ref() {
         if !message.chat().is_private() {
@@ -159,7 +159,7 @@ pub async fn handle_callback(
         }
     }
 
-    if !telegram_id_allowed(&allowed_telegram_ids, query.from.id.0 as i64) {
+    if !allowed_telegram_ids.is_allowed(query.from.id.0 as i64) {
         bot.answer_callback_query(query.id)
             .text(format!(
                 "⛔ Not authorized. Your Telegram ID: {}",

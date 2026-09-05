@@ -26,7 +26,7 @@ use zeroize::Zeroizing;
 use crate::db::{self, Db};
 use crate::utils::crypto::{self, EncryptionKey};
 use crate::utils::number_format;
-use crate::utils::telegram_id_allowed;
+use crate::utils::Allowlist;
 
 const WS_BACKOFF_INITIAL_MS: u64 = 1000;
 const WS_BACKOFF_MAX_MS: u64 = 30_000;
@@ -39,7 +39,7 @@ pub fn spawn_data_polling(
     db: Db,
     poll_interval: Duration,
     copy_trade_enabled: bool,
-    allowed_telegram_ids: Vec<i64>,
+    allowed_telegram_ids: Allowlist,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if poll_interval.is_zero() {
         return None;
@@ -60,7 +60,7 @@ pub fn spawn_data_polling(
             for wallet in wallets {
                 // Revoked users must stop receiving notifications even though
                 // their tracked-wallet rows still exist.
-                if !telegram_id_allowed(&allowed_telegram_ids, wallet.telegram_id) {
+                if !allowed_telegram_ids.is_allowed(wallet.telegram_id) {
                     continue;
                 }
 
@@ -83,7 +83,7 @@ pub fn spawn_ws_user_events(
     bot: teloxide::prelude::Bot,
     db: Db,
     encryption_key: Option<EncryptionKey>,
-    allowed_telegram_ids: Vec<i64>,
+    allowed_telegram_ids: Allowlist,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if encryption_key.is_none() {
         return None;
@@ -97,7 +97,7 @@ pub fn spawn_ws_user_events(
             };
 
             for wallet in wallets {
-                if !telegram_id_allowed(&allowed_telegram_ids, wallet.telegram_id) {
+                if !allowed_telegram_ids.is_allowed(wallet.telegram_id) {
                     continue;
                 }
 
