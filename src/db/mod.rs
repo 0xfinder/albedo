@@ -18,7 +18,6 @@ pub struct TrackedWalletWithUser {
     pub last_positions_hash: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub struct ManagedWalletWithUser {
     pub user_id: i64,
@@ -45,6 +44,10 @@ pub struct CallbackData {
 
 #[derive(Debug, FromRow)]
 pub struct CopyTradeState {
+    #[expect(
+        dead_code,
+        reason = "populated by SQLx row mapping; kept for debugging"
+    )]
     pub id: i64,
     pub user_id: i64,
     pub token_id: String,
@@ -385,6 +388,7 @@ pub async fn get_copy_trade_state(db: &Db, id: i64) -> Result<Option<CopyTradeSt
     Ok(row)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyTradeField {
     Side,
     Price,

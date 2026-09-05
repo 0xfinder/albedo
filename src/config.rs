@@ -3,9 +3,10 @@ use dotenv::dotenv;
 use std::env;
 use std::time::Duration;
 
-use crate::utils::crypto::EncryptionKey;
 use crate::utils::Allowlist;
+use crate::utils::crypto::EncryptionKey;
 
+#[derive(Clone)]
 pub struct Config {
     pub telegram_token: String,
     pub database_url: String,
@@ -15,6 +16,23 @@ pub struct Config {
     /// Telegram user IDs allowed to interact with the bot. Empty locks the
     /// bot down; there is no open-access mode.
     pub allowed_telegram_ids: Allowlist,
+}
+
+// Custom Debug: token and key material must never appear in logs.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("telegram_token", &"<redacted>")
+            .field("database_url", &self.database_url)
+            .field("data_poll_interval", &self.data_poll_interval)
+            .field(
+                "encryption_key",
+                &self.encryption_key.as_ref().map(|_| "<set>"),
+            )
+            .field("copy_trade_enabled", &self.copy_trade_enabled)
+            .field("allowed_telegram_ids", &self.allowed_telegram_ids)
+            .finish()
+    }
 }
 
 impl Config {
@@ -101,6 +119,24 @@ fn read_encryption_key() -> Result<Option<EncryptionKey>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_secrets() {
+        let config = Config {
+            telegram_token: "secret-token-123".to_string(),
+            database_url: "sqlite://bot.db".to_string(),
+            data_poll_interval: Duration::from_secs(1),
+            encryption_key: Some(
+                EncryptionKey::from_hex(&"ab".repeat(32)).expect("valid test key"),
+            ),
+            copy_trade_enabled: false,
+            allowed_telegram_ids: Allowlist::default(),
+        };
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("secret-token-123"), "{rendered}");
+        assert!(!rendered.contains(&"ab".repeat(32)), "{rendered}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+    }
 
     #[test]
     fn normalize_database_url_sqlite_double_slash() {
