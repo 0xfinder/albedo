@@ -4,6 +4,7 @@ pub mod common;
 pub mod handlers;
 pub mod menus;
 pub mod parse;
+pub mod track;
 
 use std::sync::Arc;
 
