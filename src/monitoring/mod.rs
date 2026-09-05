@@ -473,6 +473,132 @@ mod tests {
     }
 }
 
+fn no_preview_options() -> teloxide::types::LinkPreviewOptions {
+    teloxide::types::LinkPreviewOptions {
+        is_disabled: true,
+        url: None,
+        prefer_small_media: false,
+        prefer_large_media: false,
+        show_above_text: false,
+    }
+}
+
+async fn build_activity_keyboard(
+    db: &Db,
+    wallet: &db::TrackedWalletWithUser,
+    notification: &ActivityNotification,
+    copy_trade_enabled: bool,
+) -> Option<InlineKeyboardMarkup> {
+    // Closed markets (Redeem/Claim) have no positions left to show,
+    // so skip the button row entirely.
+    if is_closed_activity(&notification.activity_type) {
+        return None;
+    }
+    let condition_id = notification.condition_id.as_deref()?;
+    let (trade_token, trade_side, trade_price, trade_size) =
+        if is_tradeable_activity(&notification.activity_type) {
+            (
+                notification.asset.as_deref(),
+                notification.side.as_deref(),
+                notification.price.as_deref(),
+                Some(notification.size.as_str()),
+            )
+        } else {
+            (None, None, None, None)
+        };
+    let cb_id = db::insert_callback_data(
+        db,
+        wallet.user_id,
+        &wallet.wallet_address,
+        condition_id,
+        trade_token,
+        trade_side,
+        trade_price,
+        trade_size,
+        Some(notification.market.as_str()),
+        notification.outcome.as_deref(),
+    )
+    .await
+    .ok()?;
+    let mut buttons = vec![InlineKeyboardButton::callback(
+        "📊 Show Positions",
+        format!("sp:{cb_id}"),
+    )];
+    if trade_token.is_some() && copy_trade_enabled {
+        buttons.push(InlineKeyboardButton::callback(
+            "📋 Copy Trade",
+            format!("ct:{cb_id}"),
+        ));
+    }
+    Some(InlineKeyboardMarkup::new(vec![buttons]))
+}
+
+async fn send_with_retry<F, Fut>(mut send: F, tx_hash: &str) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::IntoFuture<Output = Result<teloxide::types::Message, teloxide::RequestError>>,
+{
+    // Retry transient Telegram failures; on persistent failure the caller
+    // stops and leaves the cursor so the next poll resumes here.
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
+        }
+        match send().into_future().await {
+            Ok(_) => return true,
+            Err(err) => {
+                eprintln!(
+                    "activity poll: send failed (attempt {} of 3) for tx {}: {err}",
+                    attempt + 1,
+                    tx_hash
+                );
+            }
+        }
+    }
+    false
+}
+
+async fn record_activity_delivery(
+    db: &Db,
+    wallet: &db::TrackedWalletWithUser,
+    notification: &ActivityNotification,
+    details: Option<&str>,
+    tx_hash_for_cursor: &str,
+) {
+    if let Err(err) = db::insert_activity_log(
+        db,
+        wallet.user_id,
+        &wallet.wallet_address,
+        &notification.activity_type,
+        notification.market_slug.as_deref(),
+        &notification.tx_hash,
+        notification.timestamp,
+        details,
+        true,
+    )
+    .await
+    {
+        eprintln!(
+            "activity poll: failed to record tx {}: {err}",
+            notification.tx_hash
+        );
+    }
+
+    if let Err(err) = db::update_tracked_wallet_activity_hash(
+        db,
+        wallet.user_id,
+        &wallet.wallet_address,
+        Some(tx_hash_for_cursor),
+    )
+    .await
+    {
+        eprintln!(
+            "activity poll: failed to advance cursor after tx {}: {err}",
+            notification.tx_hash
+        );
+    }
+}
+
 async fn poll_activity(
     bot: &teloxide::prelude::Bot,
     client: &DataClient,
@@ -551,119 +677,28 @@ async fn poll_activity(
             wallet.label.as_deref(),
             &notification,
         );
-        let mut request = bot
+        let request = bot
             .send_message(teloxide::types::ChatId(wallet.chat_id), message)
             .parse_mode(teloxide::types::ParseMode::Html)
-            .link_preview_options(teloxide::types::LinkPreviewOptions {
-                is_disabled: true,
-                url: None,
-                prefer_small_media: false,
-                prefer_large_media: false,
-                show_above_text: false,
-            });
-        // Closed markets (Redeem/Claim) have no positions left to show,
-        // so skip the button row entirely.
-        if !is_closed_activity(&notification.activity_type) {
-            if let Some(condition_id) = &notification.condition_id {
-                let (trade_token, trade_side, trade_price, trade_size) =
-                    if is_tradeable_activity(&notification.activity_type) {
-                        (
-                            notification.asset.as_deref(),
-                            notification.side.as_deref(),
-                            notification.price.as_deref(),
-                            Some(notification.size.as_str()),
-                        )
-                    } else {
-                        (None, None, None, None)
-                    };
-                if let Ok(cb_id) = db::insert_callback_data(
-                    db,
-                    wallet.user_id,
-                    &wallet.wallet_address,
-                    condition_id,
-                    trade_token,
-                    trade_side,
-                    trade_price,
-                    trade_size,
-                    Some(notification.market.as_str()),
-                    notification.outcome.as_deref(),
-                )
-                .await
-                {
-                    let mut buttons = vec![InlineKeyboardButton::callback(
-                        "📊 Show Positions",
-                        format!("sp:{cb_id}"),
-                    )];
-                    if trade_token.is_some() && copy_trade_enabled {
-                        buttons.push(InlineKeyboardButton::callback(
-                            "📋 Copy Trade",
-                            format!("ct:{cb_id}"),
-                        ));
-                    }
-                    let markup = InlineKeyboardMarkup::new(vec![buttons]);
-                    request = request.reply_markup(markup);
-                }
-            }
-        }
+            .link_preview_options(no_preview_options());
+        let request =
+            match build_activity_keyboard(db, wallet, &notification, copy_trade_enabled).await {
+                Some(markup) => request.reply_markup(markup),
+                None => request,
+            };
 
-        // Retry transient Telegram failures; on persistent failure stop and
-        // leave the cursor at the last delivered event so the next poll resumes
-        // here instead of skipping the rest of the batch.
-        let mut sent = false;
-        for attempt in 0..3 {
-            if attempt > 0 {
-                tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
-            }
-            match request.clone().await {
-                Ok(_) => {
-                    sent = true;
-                    break;
-                }
-                Err(err) => {
-                    eprintln!(
-                        "activity poll: send failed (attempt {} of 3) for tx {}: {err}",
-                        attempt + 1,
-                        notification.tx_hash
-                    );
-                }
-            }
-        }
-        if !sent {
+        if !send_with_retry(|| request.clone(), &notification.tx_hash).await {
             return Ok(());
         }
 
-        if let Err(err) = db::insert_activity_log(
+        record_activity_delivery(
             db,
-            wallet.user_id,
-            &wallet.wallet_address,
-            &notification.activity_type,
-            notification.market_slug.as_deref(),
-            &notification.tx_hash,
-            notification.timestamp,
+            wallet,
+            &notification,
             details.as_deref(),
-            true,
+            &activity.transaction_hash.to_string(),
         )
-        .await
-        {
-            eprintln!(
-                "activity poll: failed to record tx {}: {err}",
-                notification.tx_hash
-            );
-        }
-
-        if let Err(err) = db::update_tracked_wallet_activity_hash(
-            db,
-            wallet.user_id,
-            &wallet.wallet_address,
-            Some(&activity.transaction_hash.to_string()),
-        )
-        .await
-        {
-            eprintln!(
-                "activity poll: failed to advance cursor after tx {}: {err}",
-                notification.tx_hash
-            );
-        }
+        .await;
     }
 
     Ok(())
