@@ -191,7 +191,7 @@ pub async fn handle_callback(
                 user_id,
             );
             log_db_error(
-                db::set_mode(&db, user_id, "track").await,
+                db::set_mode(&db, user_id, db::UserMode::Track).await,
                 "set_mode",
                 user_id,
             );
@@ -210,7 +210,7 @@ pub async fn handle_callback(
                 user_id,
             );
             log_db_error(
-                db::set_mode(&db, user_id, "manage").await,
+                db::set_mode(&db, user_id, db::UserMode::Manage).await,
                 "set_mode",
                 user_id,
             );
@@ -648,7 +648,7 @@ async fn handle_top_level_command(
         }
         "track" => {
             log_db_error(
-                db::set_mode(db, user_id, "track").await,
+                db::set_mode(db, user_id, db::UserMode::Track).await,
                 "set_mode",
                 user_id,
             );
@@ -656,7 +656,7 @@ async fn handle_top_level_command(
         }
         "manage" => {
             log_db_error(
-                db::set_mode(db, user_id, "manage").await,
+                db::set_mode(db, user_id, db::UserMode::Manage).await,
                 "set_mode",
                 user_id,
             );

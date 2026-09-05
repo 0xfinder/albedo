@@ -107,14 +107,30 @@ pub async fn ensure_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<i64>
     Ok(user_id)
 }
 
+/// Menu mode stored per user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserMode {
+    Track,
+    Manage,
+}
+
+impl UserMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Track => "track",
+            Self::Manage => "manage",
+        }
+    }
+}
+
 /// Record the user's current menu mode.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
+pub async fn set_mode(db: &Db, user_id: i64, mode: UserMode) -> Result<()> {
     sqlx::query("UPDATE users SET current_mode = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?")
-        .bind(mode)
+        .bind(mode.as_str())
         .bind(user_id)
         .execute(db)
         .await?;
