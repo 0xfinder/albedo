@@ -388,6 +388,165 @@ mod tests {
     use super::*;
     use futures::stream;
 
+    struct FakeData {
+        activities: std::sync::Mutex<Vec<Activity>>,
+    }
+
+    impl DataApi for FakeData {
+        async fn fetch_activity(
+            &self,
+            _request: &ActivityRequest,
+        ) -> color_eyre::eyre::Result<Vec<Activity>> {
+            Ok(self.activities.lock().expect("fake data").clone())
+        }
+
+        async fn fetch_positions(
+            &self,
+            _request: &PositionsRequest,
+        ) -> color_eyre::eyre::Result<Vec<Position>> {
+            Ok(Vec::new())
+        }
+
+        async fn fetch_trades(
+            &self,
+            _request: &TradesRequest,
+        ) -> color_eyre::eyre::Result<Vec<Trade>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeNotifier {
+        sent: std::sync::Mutex<Vec<(i64, String)>>,
+    }
+
+    impl Notifier for FakeNotifier {
+        async fn notify(
+            &self,
+            chat_id: i64,
+            message: String,
+            _markup: Option<InlineKeyboardMarkup>,
+        ) -> color_eyre::eyre::Result<()> {
+            self.sent
+                .lock()
+                .expect("fake notifier")
+                .push((chat_id, message));
+            Ok(())
+        }
+    }
+
+    fn test_activity(tx_hash: &str) -> Activity {
+        serde_json::from_value(serde_json::json!({
+            "proxyWallet": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1700000000,
+            "type": "TRADE",
+            "size": 10.0,
+            "usdcSize": 5.0,
+            "transactionHash": tx_hash,
+            "price": 0.5,
+            "outcomeIndex": 0,
+        }))
+        .expect("test activity")
+    }
+
+    async fn setup_poll_db() -> (Db, db::TrackedWalletWithUser) {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let options =
+            SqliteConnectOptions::from_str("sqlite::memory:").expect("valid sqlite options");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect sqlite memory");
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&pool)
+            .await
+            .expect("enable foreign keys");
+        sqlx::migrate!("./src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+
+        let user_id = db::ensure_user(&pool, 123, 456).await.expect("insert user");
+        db::add_tracked_wallet(
+            &pool,
+            user_id,
+            "0xabababababababababababababababababababab",
+            None,
+        )
+        .await
+        .expect("track wallet");
+        let wallet = db::TrackedWalletWithUser {
+            user_id,
+            chat_id: 456,
+            telegram_id: 123,
+            wallet_address: "0xabababababababababababababababababababab".to_string(),
+            label: None,
+            last_activity_hash: None,
+            last_positions_hash: None,
+        };
+        (pool, wallet)
+    }
+
+    const TX1: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    const TX2: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
+
+    #[tokio::test]
+    async fn poll_activity_initializes_cursor_without_sending() {
+        let (db, wallet) = setup_poll_db().await;
+        let data = FakeData {
+            activities: std::sync::Mutex::new(vec![test_activity(TX1)]),
+        };
+        let notifier = FakeNotifier::default();
+        let address = Address::from_str(&wallet.wallet_address).expect("address");
+
+        poll_activity(&notifier, &data, &db, &wallet, address, false)
+            .await
+            .expect("poll");
+
+        assert!(notifier.sent.lock().expect("sent").is_empty());
+        let wallets = db::list_tracked_wallets(&db, wallet.user_id)
+            .await
+            .expect("list");
+        assert_eq!(wallets[0].last_activity_hash.as_deref(), Some(TX1));
+    }
+
+    #[tokio::test]
+    async fn poll_activity_delivers_only_new_events() {
+        let (db, wallet) = setup_poll_db().await;
+        let data = FakeData {
+            activities: std::sync::Mutex::new(vec![test_activity(TX1)]),
+        };
+        let notifier = FakeNotifier::default();
+        let address = Address::from_str(&wallet.wallet_address).expect("address");
+
+        poll_activity(&notifier, &data, &db, &wallet, address, false)
+            .await
+            .expect("init poll");
+
+        *data.activities.lock().expect("fake data") = vec![test_activity(TX2), test_activity(TX1)];
+        let mut wallet = wallet;
+        wallet.last_activity_hash = Some(TX1.to_string());
+        poll_activity(&notifier, &data, &db, &wallet, address, false)
+            .await
+            .expect("delivery poll");
+
+        {
+            let sent = notifier.sent.lock().expect("sent");
+            assert_eq!(sent.len(), 1, "{sent:?}");
+            assert_eq!(sent[0].0, wallet.chat_id);
+            assert!(sent[0].1.contains("TRADE"), "{}", sent[0].1);
+        }
+
+        wallet.last_activity_hash = Some(TX2.to_string());
+        poll_activity(&notifier, &data, &db, &wallet, address, false)
+            .await
+            .expect("repeat poll");
+        assert_eq!(notifier.sent.lock().expect("sent").len(), 1);
+    }
+
     #[tokio::test]
     async fn consume_events_stops_on_error() {
         let events = stream::iter(vec![Ok("one"), Ok("two"), Err("boom"), Ok("three")]);
