@@ -1,4 +1,8 @@
-// Entry point for the Polymarket Telegram Bot
+//! Albedo: personal Telegram bot for Polymarket wallets and trading.
+//!
+//! Startup order is config, database, background tasks, then the Telegram
+//! dispatcher, which runs until shutdown. Access is fail-closed: an empty
+//! allowlist locks the bot down for everyone.
 
 mod bot;
 mod config;

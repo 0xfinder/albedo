@@ -1,3 +1,9 @@
+//! AES-256-GCM wallet-key encryption with per-wallet associated data.
+//!
+//! Keys are zeroized on drop and never implement [`std::fmt::Debug`]. The
+//! additional authenticated data binds each ciphertext to one user and
+//! wallet, so a row copied to another wallet fails to decrypt.
+
 use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload, rand_core::RngCore};
 use aes_gcm::{Aes256Gcm, Nonce};
 use color_eyre::eyre::{Result, eyre};
@@ -13,6 +19,11 @@ pub const NONCE_LEN: usize = 12;
 pub struct EncryptionKey([u8; KEY_LEN]);
 
 impl EncryptionKey {
+    /// Parse a 64-hex-character key, with optional `0x` prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` on wrong length or non-hex characters.
     pub fn from_hex(raw: &str) -> Result<Self> {
         let trimmed = raw.trim();
         let trimmed = trimmed.strip_prefix("0x").unwrap_or(trimmed);
@@ -37,10 +48,17 @@ impl EncryptionKey {
     }
 }
 
+/// Build the additional authenticated data binding a ciphertext to one user
+/// and wallet: `{user_id}:{lowercase_address}`.
 pub fn build_aad(user_id: i64, wallet_address: &str) -> Vec<u8> {
     format!("{}:{}", user_id, wallet_address.to_lowercase()).into_bytes()
 }
 
+/// Encrypt with a fresh random nonce, returning `(ciphertext, nonce)`.
+///
+/// # Errors
+///
+/// Returns `Err` if AEAD encryption fails.
 pub fn encrypt(key: &EncryptionKey, plaintext: &[u8], aad: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).expect("key length is 32 bytes");
     let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -56,6 +74,11 @@ pub fn encrypt(key: &EncryptionKey, plaintext: &[u8], aad: &[u8]) -> Result<(Vec
     Ok((ciphertext, nonce_bytes.to_vec()))
 }
 
+/// Decrypt, verifying the nonce length, key, and associated data.
+///
+/// # Errors
+///
+/// Returns `Err` on a bad nonce length or authentication failure.
 pub fn decrypt(
     key: &EncryptionKey,
     nonce: &[u8],

@@ -1,3 +1,5 @@
+//! Shared runtime state passed to the dispatcher and background tasks.
+
 use std::sync::Arc;
 
 use teloxide::prelude::Bot;

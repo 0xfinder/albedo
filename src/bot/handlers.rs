@@ -1,3 +1,8 @@
+//! Message and callback-query handling for private chats.
+//!
+//! Every entry point enforces the allowlist first, then dispatches on the
+//! stored pending action or the callback payload.
+
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 
@@ -69,6 +74,7 @@ fn callback_chat_id(query: &CallbackQuery) -> ChatId {
         .unwrap_or(ChatId(query.from.id.0 as i64))
 }
 
+/// Handle an incoming private message: commands or pending-action input.
 pub async fn handle_message(
     bot: Bot,
     msg: Message,
@@ -156,6 +162,7 @@ pub async fn handle_message(
     Ok(())
 }
 
+/// Handle an inline-button callback: menus, positions, or copy-trade flow.
 pub async fn handle_callback(
     bot: Bot,
     query: CallbackQuery,

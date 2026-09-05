@@ -1,3 +1,5 @@
+//! Telegram dispatcher wiring: commands, handler endpoints, and shared state.
+
 pub mod handlers;
 
 use std::sync::Arc;
@@ -7,6 +9,11 @@ use teloxide::types::BotCommand;
 
 use crate::state::AppState;
 
+/// Run the Telegram dispatcher until shutdown.
+///
+/// # Errors
+///
+/// Returns `Err` if the bot identity or command list cannot be fetched.
 pub async fn start(state: Arc<AppState>) -> color_eyre::eyre::Result<()> {
     let bot = state.bot.clone();
     let me = bot.get_me().await?;

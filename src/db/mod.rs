@@ -1,3 +1,8 @@
+//! SQLite access via SQLx, with compile-time-checked migrations.
+//!
+//! `Ok(false)` from a `bool`-returning helper means zero rows matched, not a
+//! failure; `Err` means the database itself was unreachable.
+
 pub mod models;
 
 use color_eyre::eyre::Result;
@@ -59,6 +64,12 @@ pub struct CopyTradeState {
     pub outcome: Option<String>,
 }
 
+/// Connect to SQLite, enable foreign keys, and run pending migrations.
+///
+/// # Errors
+///
+/// Returns `Err` if the URL is invalid, the database is unreachable, or a
+/// migration fails.
 pub async fn init(database_url: &str) -> Result<Db> {
     let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
     let pool = SqlitePool::connect_with(options).await?;
@@ -73,6 +84,11 @@ pub async fn init(database_url: &str) -> Result<Db> {
     Ok(pool)
 }
 
+/// Load-or-create the user row, refreshing the chat id on return visits.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn ensure_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<i64> {
     sqlx::query(
         "INSERT INTO users (telegram_id, chat_id, current_mode) VALUES (?, ?, 'none')\
@@ -91,6 +107,11 @@ pub async fn ensure_user(db: &Db, telegram_id: i64, chat_id: i64) -> Result<i64>
     Ok(user_id)
 }
 
+/// Record the user's current menu mode.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
     sqlx::query("UPDATE users SET current_mode = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(mode)
@@ -101,6 +122,11 @@ pub async fn set_mode(db: &Db, user_id: i64, mode: &str) -> Result<()> {
     Ok(())
 }
 
+/// Store the in-progress multi-step action and its payload.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn set_pending_state(
     db: &Db,
     user_id: i64,
@@ -117,10 +143,20 @@ pub async fn set_pending_state(
     Ok(())
 }
 
+/// Drop any in-progress multi-step action.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn clear_pending_state(db: &Db, user_id: i64) -> Result<()> {
     set_pending_state(db, user_id, None, None).await
 }
 
+/// Fetch the in-progress multi-step action and its payload.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable or the user row is missing.
 pub async fn get_pending_state(db: &Db, user_id: i64) -> Result<(Option<String>, Option<String>)> {
     let (action, data) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
         "SELECT pending_action, pending_data FROM users WHERE id = ?",
@@ -132,6 +168,11 @@ pub async fn get_pending_state(db: &Db, user_id: i64) -> Result<(Option<String>,
     Ok((action, data))
 }
 
+/// Track a wallet; returns `false` if it was already tracked.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn add_tracked_wallet(
     db: &Db,
     user_id: i64,
@@ -151,6 +192,11 @@ pub async fn add_tracked_wallet(
     Ok(result.rows_affected() > 0)
 }
 
+/// List the wallets one user tracks, oldest first.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn list_tracked_wallets(db: &Db, user_id: i64) -> Result<Vec<models::TrackedWallet>> {
     let wallets = sqlx::query_as::<_, models::TrackedWallet>(
         "SELECT id, user_id, wallet_address, label, last_activity_hash, last_positions_hash, created_at FROM tracked_wallets WHERE user_id = ? ORDER BY created_at",
@@ -162,6 +208,11 @@ pub async fn list_tracked_wallets(db: &Db, user_id: i64) -> Result<Vec<models::T
     Ok(wallets)
 }
 
+/// Store or replace the user's encrypted trading wallet.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn set_managed_wallet(
     db: &Db,
     user_id: i64,
@@ -187,6 +238,11 @@ pub async fn set_managed_wallet(
     Ok(())
 }
 
+/// Rename the user's managed wallet.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn update_managed_wallet_label(db: &Db, user_id: i64, label: Option<&str>) -> Result<()> {
     sqlx::query("UPDATE managed_wallets SET label = ? WHERE user_id = ?")
         .bind(label)
@@ -197,6 +253,11 @@ pub async fn update_managed_wallet_label(db: &Db, user_id: i64, label: Option<&s
     Ok(())
 }
 
+/// Fetch the user's managed wallet, if one is stored.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn get_managed_wallet(db: &Db, user_id: i64) -> Result<Option<models::ManagedWallet>> {
     let wallet = sqlx::query_as::<_, models::ManagedWallet>(
         "SELECT id, user_id, wallet_address, label, signature_type, encrypted_key, nonce, created_at FROM managed_wallets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -208,6 +269,11 @@ pub async fn get_managed_wallet(db: &Db, user_id: i64) -> Result<Option<models::
     Ok(wallet)
 }
 
+/// List every managed wallet with its owner's Telegram routing ids.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn list_managed_wallets_with_users(db: &Db) -> Result<Vec<ManagedWalletWithUser>> {
     let wallets = sqlx::query_as::<_, ManagedWalletWithUser>(
         "SELECT managed_wallets.user_id, users.chat_id, users.telegram_id, managed_wallets.wallet_address, \
@@ -221,6 +287,11 @@ pub async fn list_managed_wallets_with_users(db: &Db) -> Result<Vec<ManagedWalle
     Ok(wallets)
 }
 
+/// Delete the user's managed wallet; `false` means none was stored.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn remove_managed_wallet(db: &Db, user_id: i64) -> Result<bool> {
     let result = sqlx::query("DELETE FROM managed_wallets WHERE user_id = ?")
         .bind(user_id)
@@ -230,6 +301,11 @@ pub async fn remove_managed_wallet(db: &Db, user_id: i64) -> Result<bool> {
     Ok(result.rows_affected() > 0)
 }
 
+/// Change how the managed wallet signs; `false` means none was stored.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn update_managed_wallet_signature_type(
     db: &Db,
     user_id: i64,
@@ -244,6 +320,11 @@ pub async fn update_managed_wallet_signature_type(
     Ok(result.rows_affected() > 0)
 }
 
+/// List every tracked wallet with its owner's Telegram routing ids.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalletWithUser>> {
     let wallets = sqlx::query_as::<_, TrackedWalletWithUser>(
         "SELECT tracked_wallets.user_id, users.chat_id, users.telegram_id, tracked_wallets.wallet_address, \
@@ -257,6 +338,11 @@ pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalle
     Ok(wallets)
 }
 
+/// Stop tracking a wallet; `false` means it was not tracked.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn remove_tracked_wallet(db: &Db, user_id: i64, wallet_address: &str) -> Result<bool> {
     let result =
         sqlx::query("DELETE FROM tracked_wallets WHERE user_id = ? AND wallet_address = ?")
@@ -287,6 +373,11 @@ async fn update_tracked_wallet_hash(
     Ok(())
 }
 
+/// Advance the activity cursor for one tracked wallet.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn update_tracked_wallet_activity_hash(
     db: &Db,
     user_id: i64,
@@ -296,6 +387,11 @@ pub async fn update_tracked_wallet_activity_hash(
     update_tracked_wallet_hash(db, user_id, wallet_address, hash, "last_activity_hash").await
 }
 
+/// Advance the positions cursor for one tracked wallet.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn update_tracked_wallet_positions_hash(
     db: &Db,
     user_id: i64,
@@ -305,6 +401,11 @@ pub async fn update_tracked_wallet_positions_hash(
     update_tracked_wallet_hash(db, user_id, wallet_address, hash, "last_positions_hash").await
 }
 
+/// Persist an inline-button payload, returning its row id for callbacks.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn insert_callback_data(
     db: &Db,
     user_id: i64,
@@ -336,6 +437,11 @@ pub async fn insert_callback_data(
     Ok(result.last_insert_rowid())
 }
 
+/// Fetch an inline-button payload by row id.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<CallbackData>> {
     let row = sqlx::query_as::<_, CallbackData>(
         "SELECT user_id, wallet_address, condition_id, token_id, side, price, size, market_title, outcome FROM callback_data WHERE id = ?",
@@ -347,6 +453,11 @@ pub async fn get_callback_data(db: &Db, id: i64) -> Result<Option<CallbackData>>
     Ok(row)
 }
 
+/// Persist an in-progress copy-trade draft, returning its row id.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn insert_copy_trade_state(
     db: &Db,
     user_id: i64,
@@ -376,6 +487,11 @@ pub async fn insert_copy_trade_state(
     Ok(result.last_insert_rowid())
 }
 
+/// Fetch a copy-trade draft by row id.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn get_copy_trade_state(db: &Db, id: i64) -> Result<Option<CopyTradeState>> {
     let row = sqlx::query_as::<_, CopyTradeState>(
         "SELECT id, user_id, token_id, side, price, size, order_type, market_title, outcome \
@@ -396,6 +512,11 @@ pub enum CopyTradeField {
     OrderType,
 }
 
+/// Update one field of a copy-trade draft; `false` means no such row.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn update_copy_trade_field(
     db: &Db,
     id: i64,
@@ -413,6 +534,11 @@ pub async fn update_copy_trade_field(
     Ok(result.rows_affected() > 0)
 }
 
+/// Delete a copy-trade draft; `false` means no such row.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn delete_copy_trade_state(db: &Db, id: i64) -> Result<bool> {
     let result = sqlx::query("DELETE FROM copy_trade_state WHERE id = ?")
         .bind(id)
@@ -757,6 +883,11 @@ mod tests {
     }
 }
 
+/// Check whether an activity was already delivered, for dedupe.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn activity_log_exists(
     db: &Db,
     user_id: i64,
@@ -778,6 +909,11 @@ pub async fn activity_log_exists(
     Ok(count > 0)
 }
 
+/// Record a delivered activity; `false` means it was already recorded.
+///
+/// # Errors
+///
+/// Returns `Err` if the database is unreachable.
 pub async fn insert_activity_log(
     db: &Db,
     user_id: i64,

@@ -1,3 +1,5 @@
+//! Display formatting for decimal market values, prices, and odds.
+
 use polymarket_client_sdk::types::Decimal;
 use std::str::FromStr;
 
@@ -16,18 +18,22 @@ fn format_with_decimals(value: Decimal, decimals: u32) -> String {
     format!("{:.*}", decimals as usize, value.round_dp(decimals))
 }
 
+/// Format a market value with the shared decimal precision.
 pub fn format_value(value: Decimal) -> String {
     format_with_decimals(value, NUMBER_FORMAT_CONFIG.value_decimals)
 }
 
+/// Format an optional value, rendering missing data as `N/A`.
 pub fn format_option_value(value: Option<Decimal>) -> String {
     value.map(format_value).unwrap_or_else(|| "N/A".to_string())
 }
 
+/// Format a value as dollars, e.g. `$0.500`.
 pub fn format_usd(value: Decimal) -> String {
     format!("${}", format_value(value))
 }
 
+/// Convert a probability price to decimal odds; `None` for non-positive prices.
 pub fn decimal_odds_from_price(price: Decimal) -> Option<Decimal> {
     if price > Decimal::ZERO {
         Some(Decimal::ONE / price)
@@ -36,6 +42,7 @@ pub fn decimal_odds_from_price(price: Decimal) -> Option<Decimal> {
     }
 }
 
+/// Format a price with its decimal odds, e.g. `$0.500 (2.00)`.
 pub fn format_price_with_odds(price: Decimal) -> String {
     let usd = format_usd(price);
     match decimal_odds_from_price(price) {
@@ -47,6 +54,7 @@ pub fn format_price_with_odds(price: Decimal) -> String {
     }
 }
 
+/// Parse and format a raw price string; `None` if unparseable.
 pub fn format_price_with_odds_str(raw: &str) -> Option<String> {
     Decimal::from_str(raw.trim())
         .ok()

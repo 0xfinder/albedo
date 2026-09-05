@@ -1,3 +1,9 @@
+//! Polymarket activity monitoring: REST polling and websocket user events.
+//!
+//! Polling is cursor-based per tracked wallet; transient failures are logged
+//! and retried while the cursor stays put, so the next poll resumes instead
+//! of skipping events.
+
 use futures::{Stream, StreamExt};
 use polymarket_client_sdk::POLYGON;
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
@@ -43,6 +49,10 @@ const TELEGRAM_SEND_MAX_ATTEMPTS: u64 = 3;
 
 type MarketCache = Arc<Mutex<HashMap<String, MarketInfo>>>;
 
+/// Poll tracked wallets and notify on new activity and positions.
+///
+/// Returns `None` when polling is disabled (`0s` interval); the task logs
+/// transient failures and keeps the cursor so nothing is skipped.
 pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
     if state.config.data_poll_interval.is_zero() {
         return None;
@@ -93,6 +103,10 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
     }))
 }
 
+/// Stream per-wallet user events over websocket with reconnect backoff.
+///
+/// Returns `None` when no encryption key is configured, since managed-wallet
+/// events cannot be authenticated without one.
 pub fn spawn_ws_user_events(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
     if state.config.encryption_key.is_none() {
         return None;

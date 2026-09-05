@@ -1,3 +1,5 @@
+//! Row-mapping structs for tables also covered by [`crate::db`] helpers.
+
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 

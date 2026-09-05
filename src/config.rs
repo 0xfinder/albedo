@@ -1,3 +1,8 @@
+//! Environment configuration with fail-closed defaults.
+//!
+//! Optional flags default to off and an unset allowlist locks the bot down;
+//! only `TELEGRAM_TOKEN` is required.
+
 use color_eyre::eyre::{Context, Result};
 use dotenv::dotenv;
 use std::env;
@@ -36,6 +41,14 @@ impl std::fmt::Debug for Config {
 }
 
 impl Config {
+    /// Load configuration from the environment.
+    ///
+    /// Fails fast on a missing `TELEGRAM_TOKEN`; everything else has a
+    /// fail-closed default.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if `TELEGRAM_TOKEN` is unset or `ENCRYPTION_KEY` is malformed.
     pub fn from_env() -> Result<Self> {
         dotenv().ok();
 
