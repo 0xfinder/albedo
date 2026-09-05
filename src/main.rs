@@ -22,7 +22,10 @@ pub const VERSION: &str = env!("GIT_VERSION");
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    println!("albedo {VERSION}");
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    tracing::info!(version = VERSION, "albedo starting");
 
     // Initialize configuration
     let config = config::Config::from_env()?;
@@ -34,9 +37,8 @@ async fn main() -> Result<()> {
     let bot = Bot::new(&config.telegram_token);
 
     if config.allowed_telegram_ids.is_empty() {
-        eprintln!(
-            "WARNING: ALLOWED_TELEGRAM_IDS is empty - the bot is locked down \
-             and no one can interact with it. Add your Telegram user ID in .env."
+        tracing::warn!(
+            "ALLOWED_TELEGRAM_IDS is empty; bot is locked down, add your Telegram user ID in .env"
         );
     }
 

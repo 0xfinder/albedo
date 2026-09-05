@@ -1,18 +1,18 @@
 use futures::{Stream, StreamExt};
+use polymarket_client_sdk::POLYGON;
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
-use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
-use polymarket_client_sdk::clob::ws::Client as WsClient;
 use polymarket_client_sdk::clob::Client as ClobClient;
+use polymarket_client_sdk::clob::ws::Client as WsClient;
+use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
+use polymarket_client_sdk::data::Client as DataClient;
+use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::{
     ActivityRequest, PositionsRequest, TradesRequest,
 };
 use polymarket_client_sdk::data::types::response::Activity;
-use polymarket_client_sdk::data::types::MarketFilter;
-use polymarket_client_sdk::data::Client as DataClient;
-use polymarket_client_sdk::types::{Address, Decimal, B256};
-use polymarket_client_sdk::POLYGON;
+use polymarket_client_sdk::types::{Address, B256, Decimal};
 use serde::Serialize;
-use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -141,7 +141,7 @@ where
                 return StreamOutcome {
                     ok_count,
                     exit: StreamExit::Error,
-                }
+                };
             }
         }
     }
@@ -172,7 +172,7 @@ where
                 return StreamOutcome {
                     ok_count,
                     exit: StreamExit::Error,
-                }
+                };
             }
         }
     }
@@ -551,10 +551,11 @@ where
         match send().into_future().await {
             Ok(_) => return true,
             Err(err) => {
-                eprintln!(
-                    "activity poll: send failed (attempt {} of 3) for tx {}: {err}",
-                    attempt + 1,
-                    tx_hash
+                tracing::warn!(
+                    attempt = attempt + 1,
+                    tx_hash = tx_hash,
+                    error = %err,
+                    "activity poll send failed"
                 );
             }
         }
@@ -582,9 +583,10 @@ async fn record_activity_delivery(
     )
     .await
     {
-        eprintln!(
-            "activity poll: failed to record tx {}: {err}",
-            notification.tx_hash
+        tracing::error!(
+            tx_hash = notification.tx_hash.as_str(),
+            error = %err,
+            "activity poll failed to record delivery"
         );
     }
 
@@ -596,9 +598,10 @@ async fn record_activity_delivery(
     )
     .await
     {
-        eprintln!(
-            "activity poll: failed to advance cursor after tx {}: {err}",
-            notification.tx_hash
+        tracing::error!(
+            tx_hash = notification.tx_hash.as_str(),
+            error = %err,
+            "activity poll failed to advance cursor"
         );
     }
 }
@@ -668,9 +671,10 @@ async fn poll_activity(
             Ok(true) => continue,
             Ok(false) => {}
             Err(err) => {
-                eprintln!(
-                    "activity poll: dedupe check failed for tx {}: {err}",
-                    notification.tx_hash
+                tracing::error!(
+                    tx_hash = notification.tx_hash.as_str(),
+                    error = %err,
+                    "activity poll dedupe check failed"
                 );
                 return Ok(());
             }
