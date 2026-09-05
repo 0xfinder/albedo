@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 pub type Db = SqlitePool;
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 pub struct TrackedWalletWithUser {
     pub user_id: i64,
     pub chat_id: i64,
@@ -23,7 +23,7 @@ pub struct TrackedWalletWithUser {
     pub last_positions_hash: Option<String>,
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 pub struct ManagedWalletWithUser {
     pub user_id: i64,
     pub chat_id: i64,

@@ -67,7 +67,10 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
 
             let wallets = match db::list_tracked_wallets_with_users(&state.db).await {
                 Ok(wallets) => wallets,
-                Err(_) => continue,
+                Err(err) => {
+                    tracing::warn!(error = %err, "poll cycle skipped: wallets unreadable");
+                    continue;
+                }
             };
 
             for wallet in wallets {
@@ -83,10 +86,17 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
 
                 let address = match Address::from_str(&wallet.wallet_address) {
                     Ok(address) => address,
-                    Err(_) => continue,
+                    Err(err) => {
+                        tracing::warn!(
+                            wallet = wallet.wallet_address.as_str(),
+                            error = %err,
+                            "skipping wallet with invalid address"
+                        );
+                        continue;
+                    }
                 };
 
-                let _ = poll_activity(
+                if let Err(err) = poll_activity(
                     &state.bot,
                     &client,
                     &state.db,
@@ -94,8 +104,23 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
                     address,
                     state.config.copy_trade_enabled,
                 )
-                .await;
-                let _ = poll_positions(&state.bot, &client, &state.db, &wallet, address).await;
+                .await
+                {
+                    tracing::warn!(
+                        wallet = wallet.wallet_address.as_str(),
+                        error = %err,
+                        "activity poll failed"
+                    );
+                }
+                if let Err(err) =
+                    poll_positions(&state.bot, &client, &state.db, &wallet, address).await
+                {
+                    tracing::warn!(
+                        wallet = wallet.wallet_address.as_str(),
+                        error = %err,
+                        "positions poll failed"
+                    );
+                }
 
                 tokio::time::sleep(Duration::from_millis(POLL_WALLET_GAP_MS)).await;
             }
@@ -116,7 +141,10 @@ pub fn spawn_ws_user_events(state: Arc<AppState>) -> Option<tokio::task::JoinHan
         if let Some(encryption_key) = state.config.encryption_key.clone() {
             let wallets = match db::list_managed_wallets_with_users(&state.db).await {
                 Ok(wallets) => wallets,
-                Err(_) => return,
+                Err(err) => {
+                    tracing::warn!(error = %err, "ws fan-out skipped: wallets unreadable");
+                    return;
+                }
             };
 
             for wallet in wallets {
@@ -132,7 +160,15 @@ pub fn spawn_ws_user_events(state: Arc<AppState>) -> Option<tokio::task::JoinHan
                 let db = state.db.clone();
                 let bot = state.bot.clone();
                 tokio::spawn(async move {
-                    let _ = connect_user_events(wallet, db, bot, encryption_key).await;
+                    if let Err(err) =
+                        connect_user_events(wallet.clone(), db, bot, encryption_key).await
+                    {
+                        tracing::warn!(
+                            wallet = wallet.wallet_address.as_str(),
+                            error = %err,
+                            "user event stream ended with error"
+                        );
+                    }
                 });
             }
         }
@@ -214,7 +250,10 @@ where
     let mut backoff = Duration::from_millis(WS_BACKOFF_INITIAL_MS);
     loop {
         let started = Instant::now();
-        let _ = connect().await;
+        match connect().await {
+            Ok(outcome) => tracing::debug!(?outcome, "user event stream ended"),
+            Err(err) => tracing::warn!(error = %err, "user event stream failed"),
+        }
         let elapsed = started.elapsed();
         if elapsed >= Duration::from_secs(WS_BACKOFF_RESET_AFTER_SECS) {
             backoff = Duration::from_millis(WS_BACKOFF_INITIAL_MS);
@@ -643,7 +682,14 @@ async fn poll_activity(
         .build();
     let activities = match client.activity(&request).await {
         Ok(activities) => activities,
-        Err(_) => return Ok(()),
+        Err(err) => {
+            tracing::warn!(
+                wallet = wallet.wallet_address.as_str(),
+                error = %err,
+                "activity fetch failed"
+            );
+            return Ok(());
+        }
     };
 
     if activities.is_empty() {
@@ -657,13 +703,20 @@ async fn poll_activity(
     let last_hash = wallet.last_activity_hash.as_deref();
     if last_hash.is_none() {
         if let Some(hash) = latest_hash.as_deref() {
-            let _ = db::update_tracked_wallet_activity_hash(
+            if let Err(err) = db::update_tracked_wallet_activity_hash(
                 db,
                 wallet.user_id,
                 &wallet.wallet_address,
                 Some(hash),
             )
-            .await;
+            .await
+            {
+                tracing::warn!(
+                    wallet = wallet.wallet_address.as_str(),
+                    error = %err,
+                    "activity cursor init failed"
+                );
+            }
         }
         return Ok(());
     }
@@ -751,7 +804,14 @@ async fn poll_positions(
         .build();
     let positions = match client.positions(&request).await {
         Ok(positions) => positions,
-        Err(_) => return Ok(()),
+        Err(err) => {
+            tracing::warn!(
+                wallet = wallet.wallet_address.as_str(),
+                error = %err,
+                "positions fetch failed"
+            );
+            return Ok(());
+        }
     };
 
     let hash = hash_positions(&positions);
@@ -762,13 +822,20 @@ async fn poll_positions(
         return Ok(());
     }
 
-    let _ = db::update_tracked_wallet_positions_hash(
+    if let Err(err) = db::update_tracked_wallet_positions_hash(
         db,
         wallet.user_id,
         &wallet.wallet_address,
         Some(&hash_string),
     )
-    .await;
+    .await
+    {
+        tracing::warn!(
+            wallet = wallet.wallet_address.as_str(),
+            error = %err,
+            "positions cursor update failed"
+        );
+    }
 
     if last_hash.is_none() {
         return Ok(());
@@ -983,7 +1050,14 @@ async fn handle_ws_message(
                 .await
                 {
                     Ok(inserted) => should_send = inserted,
-                    Err(_) => should_send = true,
+                    Err(err) => {
+                        tracing::warn!(
+                            wallet = wallet.wallet_address.as_str(),
+                            error = %err,
+                            "ws trade dedupe check failed, sending anyway"
+                        );
+                        should_send = true;
+                    }
                 }
             }
 
@@ -992,16 +1066,30 @@ async fn handle_ws_message(
             }
 
             let message = format_ws_trade_message(label, &trade, &market_label);
-            let _ = bot
+            if let Err(err) = bot
                 .send_message(teloxide::types::ChatId(wallet.chat_id), message)
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    wallet = wallet.wallet_address.as_str(),
+                    error = %err,
+                    "ws trade notification failed"
+                );
+            }
         }
         WsMessage::Order(order) => {
             let market_label = resolve_market_label(data_client, market_cache, order.market).await;
             let message = format_ws_order_message(label, &order, &market_label);
-            let _ = bot
+            if let Err(err) = bot
                 .send_message(teloxide::types::ChatId(wallet.chat_id), message)
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    wallet = wallet.wallet_address.as_str(),
+                    error = %err,
+                    "ws order notification failed"
+                );
+            }
         }
         _ => {}
     }
