@@ -1,5 +1,7 @@
 //! Inline keyboards and menu-sending helpers.
 
+use crate::db::WalletMode;
+
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 
@@ -11,6 +13,7 @@ pub(crate) const HELP_TEXT: &str = "Available commands:
 \
 /help - Show this help message
 \
+/archive - Save wallets without monitoring\n\
 /track - Open the track menu
 \
 /manage - Open the manage menu
@@ -20,6 +23,7 @@ pub(crate) const HELP_TEXT: &str = "Available commands:
 pub(crate) fn main_menu_markup() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback("🧭 Track", "menu:track"),
+        InlineKeyboardButton::callback("📦 Archive", "menu:archive"),
         InlineKeyboardButton::callback("⚙️ Manage", "menu:manage"),
     ]])
 }
@@ -30,18 +34,80 @@ pub(crate) fn track_menu_markup() -> InlineKeyboardMarkup {
             InlineKeyboardButton::callback("➕ Add address", "track:add"),
             InlineKeyboardButton::callback("➖ Remove address", "track:remove"),
         ],
-        vec![InlineKeyboardButton::callback("📋 View all", "track:list")],
+        vec![InlineKeyboardButton::callback(
+            "📋 View all / Archive wallets",
+            "track:list",
+        )],
+        vec![InlineKeyboardButton::callback("📦 Archive", "menu:archive")],
         vec![InlineKeyboardButton::callback("↩️ Back", "menu:main")],
     ])
 }
 
-pub(crate) fn label_menu_markup() -> InlineKeyboardMarkup {
+pub(crate) const ARCHIVE_MENU_TEXT: &str = "Archived wallets are saved but not monitored. Add an address, or view your list to start tracking a wallet.";
+
+pub(crate) fn archive_menu_markup() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("➕ Archive address", "archive:add"),
+            InlineKeyboardButton::callback("🗑️ Delete address", "archive:remove"),
+        ],
+        vec![InlineKeyboardButton::callback(
+            "📋 View archive",
+            "archive:list",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "🧭 Tracked wallets",
+            "menu:track",
+        )],
+        vec![InlineKeyboardButton::callback("↩️ Back", "menu:main")],
+    ])
+}
+
+pub(crate) async fn send_wallet_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    mode: WalletMode,
+) -> ResponseResult<()> {
+    match mode {
+        WalletMode::Tracked => send_track_menu(bot, chat_id).await,
+        WalletMode::Archived => {
+            bot.send_message(chat_id, ARCHIVE_MENU_TEXT)
+                .reply_markup(archive_menu_markup())
+                .await?;
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn wallet_cancel_markup(mode: WalletMode) -> InlineKeyboardMarkup {
+    let callback = if mode.is_archived() {
+        "archive:cancel"
+    } else {
+        "action:cancel"
+    };
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "Cancel", callback,
+    )]])
+}
+
+pub(crate) fn label_menu_markup(mode: WalletMode) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::callback(
             "Skip label",
-            "track:skip_label",
+            if mode.is_archived() {
+                "archive:skip_label"
+            } else {
+                "track:skip_label"
+            },
         )],
-        vec![InlineKeyboardButton::callback("Cancel", "action:cancel")],
+        vec![InlineKeyboardButton::callback(
+            "Cancel",
+            if mode.is_archived() {
+                "archive:cancel"
+            } else {
+                "action:cancel"
+            },
+        )],
     ])
 }
 
@@ -143,13 +209,6 @@ pub(crate) fn manage_remove_confirm_markup() -> InlineKeyboardMarkup {
             "manage:cancel_action",
         )],
     ])
-}
-
-pub(crate) fn cancel_menu_markup() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        "Cancel",
-        "action:cancel",
-    )]])
 }
 
 pub(crate) async fn send_callback_menu(

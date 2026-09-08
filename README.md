@@ -5,6 +5,7 @@ Personal Telegram bot because the Polymarket UI sucks.
 ## Features
 
 - **Track wallets**: Monitor any wallet's activity and position changes
+- **Archive wallets**: Save addresses and labels without monitoring them
 - **Manage wallets**: Store encrypted private keys to place orders directly from Telegram
 - Real-time notifications for trades and position updates
 
@@ -67,6 +68,16 @@ Start a conversation with your bot on Telegram and use `/start` to see the menu.
 ### Track Mode
 - Add wallet addresses to monitor
 - Receive notifications when tracked wallets make trades
+
+### Archive Mode
+- Open `/archive` or tap **Archive** in the main menu
+- Use **Archive address**, send an `0x...` address, then add a label or tap **Skip label**
+- Archiving an existing tracked address stops monitoring it. Skipping the label keeps its existing label
+- In the tracked wallet list, tap **Archive** to save a wallet with one tap
+- In **View archive**, tap **Start tracking** to restore monitoring. Activity from the archived period is not replayed; the next poll establishes a fresh baseline
+- Use **Delete address** to remove a saved wallet from the archive
+
+Database migrations run automatically on startup. Existing wallets remain tracked.
 
 ### Manage Mode
 - Authenticate with your private key (encrypted and stored locally)

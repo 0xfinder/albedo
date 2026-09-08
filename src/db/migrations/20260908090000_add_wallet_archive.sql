@@ -1,0 +1,1 @@
+ALTER TABLE tracked_wallets ADD COLUMN archived BOOLEAN NOT NULL DEFAULT FALSE CHECK (archived IN (0, 1));

@@ -10,11 +10,12 @@ use polymarket_client_sdk::data::Client as DataClient;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 
-use crate::db::{self, Db};
+use crate::db::{self, Db, WalletMode};
 use crate::state::AppState;
 use crate::utils::crypto::EncryptionKey;
 
 use super::common::{
+    ACTION_ARCHIVE_ADD_ADDRESS, ACTION_ARCHIVE_ADD_LABEL, ACTION_ARCHIVE_REMOVE,
     ACTION_COPY_TRADE_EDIT_PRICE, ACTION_COPY_TRADE_EDIT_SIZE, ACTION_MANAGE_AUTH_KEY,
     ACTION_MANAGE_AUTH_LABEL, ACTION_MANAGE_CANCEL_ORDER, ACTION_MANAGE_LIMIT_ORDER,
     ACTION_MANAGE_MARKET_ORDER, ACTION_MANAGE_POSITIONS, ACTION_TRACK_ADD_ADDRESS,
@@ -32,12 +33,12 @@ use super::manage::{
     set_managed_wallet_type,
 };
 use super::menus::{
-    HELP_TEXT, cancel_menu_markup, main_menu_markup, manage_cancel_menu_markup, manage_menu_markup,
-    manage_wallet_type_change_markup, manage_wallet_type_setup_markup, send_callback_menu,
-    send_track_menu, track_menu_markup,
+    ARCHIVE_MENU_TEXT, HELP_TEXT, archive_menu_markup, main_menu_markup, manage_cancel_menu_markup,
+    manage_menu_markup, manage_wallet_type_change_markup, manage_wallet_type_setup_markup,
+    send_callback_menu, send_track_menu, send_wallet_menu, track_menu_markup, wallet_cancel_markup,
 };
 use super::parse::parse_incoming_command;
-use super::track::{finalize_track_add, send_tracked_wallets};
+use super::track::{finalize_wallet_add, send_wallets};
 
 /// Handle an incoming private message: commands or pending-action input.
 pub async fn handle_message(
@@ -205,6 +206,14 @@ pub async fn handle_callback(
             )
             .await?;
         }
+        "menu:archive" | "archive:cancel" => {
+            log_db_error(
+                db::clear_pending_state(&db, user_id).await,
+                "clear_pending_state",
+                user_id,
+            );
+            send_callback_menu(&bot, &query, ARCHIVE_MENU_TEXT, archive_menu_markup()).await?;
+        }
         "menu:manage" => {
             log_db_error(
                 db::clear_pending_state(&db, user_id).await,
@@ -371,67 +380,105 @@ pub async fn handle_callback(
             set_managed_wallet_type(&bot, chat_id, &db, user_id, SignatureType::Proxy).await?;
             bot.answer_callback_query(query.id).await?;
         }
-        "track:add" => {
+        "track:add" | "archive:add" => {
+            let mode = if data == "archive:add" {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            let action = if mode.is_archived() {
+                ACTION_ARCHIVE_ADD_ADDRESS
+            } else {
+                ACTION_TRACK_ADD_ADDRESS
+            };
             log_db_error(
-                db::set_pending_state(&db, user_id, Some(ACTION_TRACK_ADD_ADDRESS), None).await,
+                db::set_pending_state(&db, user_id, Some(action), None).await,
                 "set_pending_state",
                 user_id,
             );
             send_callback_menu(
                 &bot,
                 &query,
-                "Send the wallet address you want to track (0x...).",
-                cancel_menu_markup(),
+                if mode.is_archived() { "Send the wallet address to archive (0x...). If tracked, it will stop being monitored. You can add a label next." } else { "Send the wallet address you want to track (0x...). Archived wallets will resume monitoring." },
+                wallet_cancel_markup(mode),
             )
             .await?;
         }
-        "track:remove" => {
+        "track:remove" | "archive:remove" => {
+            let mode = if data == "archive:remove" {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            let action = if mode.is_archived() {
+                ACTION_ARCHIVE_REMOVE
+            } else {
+                ACTION_TRACK_REMOVE
+            };
             log_db_error(
-                db::set_pending_state(&db, user_id, Some(ACTION_TRACK_REMOVE), None).await,
+                db::set_pending_state(&db, user_id, Some(action), None).await,
                 "set_pending_state",
                 user_id,
             );
             send_callback_menu(
                 &bot,
                 &query,
-                "Send the tracked address you want to remove.",
-                cancel_menu_markup(),
+                if mode.is_archived() { "Send the archived address you want to delete from your saved list." } else { "Send the tracked address you want to remove. To keep it saved, use View all / Archive wallets instead." },
+                wallet_cancel_markup(mode),
             )
             .await?;
         }
-        "track:list" => {
+        "track:list" | "archive:list" => {
+            let mode = if data == "archive:list" {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
             log_db_error(
                 db::clear_pending_state(&db, user_id).await,
                 "clear_pending_state",
                 user_id,
             );
+            bot.answer_callback_query(query.id.clone()).await?;
             let chat_id = callback_chat_id(&query);
-            send_tracked_wallets(&bot, chat_id, &db, user_id).await?;
-            bot.answer_callback_query(query.id).await?;
+            send_wallets(&bot, chat_id, &db, user_id, mode).await?;
         }
-        "track:skip_label" => {
+        "track:skip_label" | "archive:skip_label" => {
+            let mode = if data == "archive:skip_label" {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            let expected_action = if mode.is_archived() {
+                ACTION_ARCHIVE_ADD_LABEL
+            } else {
+                ACTION_TRACK_ADD_LABEL
+            };
             let chat_id = callback_chat_id(&query);
             match db::get_pending_state(&db, user_id).await {
-                Ok((Some(action), data)) if action == ACTION_TRACK_ADD_LABEL => {
+                Ok((Some(action), data)) if action == expected_action => {
                     if let Some(wallet_address) = data {
-                        finalize_track_add(&bot, chat_id, &db, user_id, &wallet_address, None)
-                            .await?;
+                        finalize_wallet_add(
+                            &bot,
+                            chat_id,
+                            &db,
+                            user_id,
+                            &wallet_address,
+                            None,
+                            mode,
+                        )
+                        .await?;
                     } else {
                         log_db_error(
                             db::clear_pending_state(&db, user_id).await,
                             "clear_pending_state",
                             user_id,
                         );
-                        send_track_menu(&bot, chat_id).await?;
+                        send_wallet_menu(&bot, chat_id, mode).await?;
                     }
                 }
                 Ok(_) => {
-                    log_db_error(
-                        db::clear_pending_state(&db, user_id).await,
-                        "clear_pending_state",
-                        user_id,
-                    );
-                    send_track_menu(&bot, chat_id).await?;
+                    bot.send_message(chat_id, MSG_ACTION_EXPIRED).await?;
                 }
                 Err(_err) => {
                     bot.send_message(chat_id, "Sorry, I couldn't update that request.")
@@ -498,6 +545,46 @@ pub async fn handle_callback(
                 manage_menu_markup(),
             )
             .await?;
+        }
+        data if data.starts_with("wallet:archive:") || data.starts_with("wallet:track:") => {
+            bot.answer_callback_query(query.id.clone()).await?;
+            let mode = if data.starts_with("wallet:archive:") {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            let chat_id = callback_chat_id(&query);
+            if let Some(id) = data
+                .rsplit(':')
+                .next()
+                .and_then(|id| id.parse::<i64>().ok())
+            {
+                match db::move_wallet(&db, user_id, id, mode).await {
+                    Ok(true) => {
+                        log_db_error(
+                            db::clear_pending_state(&db, user_id).await,
+                            "clear_pending_state",
+                            user_id,
+                        );
+                        bot.send_message(chat_id, if mode.is_archived() { "Wallet archived. Its address and label are saved. Monitoring stopped." } else { "Wallet is now tracked. Monitoring resumes from its next poll." }).await?;
+                        send_wallet_menu(&bot, chat_id, mode).await?;
+                    }
+                    Ok(false) => {
+                        bot.send_message(
+                            chat_id,
+                            "That wallet has already moved or was removed. Open the list again.",
+                        )
+                        .await?;
+                    }
+                    Err(_) => {
+                        bot.send_message(
+                            chat_id,
+                            "Sorry, I couldn't move that wallet. Try again soon.",
+                        )
+                        .await?;
+                    }
+                }
+            }
         }
         data if data.starts_with("sp:") => {
             let chat_id = callback_chat_id(&query);
@@ -657,6 +744,9 @@ async fn handle_top_level_command(
             );
             send_track_menu(&bot, msg.chat.id).await?;
         }
+        "archive" => {
+            send_wallet_menu(&bot, msg.chat.id, WalletMode::Archived).await?;
+        }
         "manage" => {
             log_db_error(
                 db::set_mode(db, user_id, db::UserMode::Manage).await,
@@ -703,14 +793,29 @@ async fn handle_pending_action(
     encryption_key: Option<EncryptionKey>,
 ) -> ResponseResult<()> {
     match action {
-        ACTION_TRACK_ADD_ADDRESS => {
-            super::track::handle_address_input(&bot, &msg, db, user_id, input).await?;
+        ACTION_TRACK_ADD_ADDRESS | ACTION_ARCHIVE_ADD_ADDRESS => {
+            let mode = if action == ACTION_ARCHIVE_ADD_ADDRESS {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            super::track::handle_address_input(&bot, &msg, db, user_id, input, mode).await?;
         }
-        ACTION_TRACK_ADD_LABEL => {
-            super::track::handle_label_input(&bot, &msg, db, user_id, data, input).await?;
+        ACTION_TRACK_ADD_LABEL | ACTION_ARCHIVE_ADD_LABEL => {
+            let mode = if action == ACTION_ARCHIVE_ADD_LABEL {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            super::track::handle_label_input(&bot, &msg, db, user_id, data, input, mode).await?;
         }
-        ACTION_TRACK_REMOVE => {
-            super::track::handle_remove_input(&bot, &msg, db, user_id, input).await?;
+        ACTION_TRACK_REMOVE | ACTION_ARCHIVE_REMOVE => {
+            let mode = if action == ACTION_ARCHIVE_REMOVE {
+                WalletMode::Archived
+            } else {
+                WalletMode::Tracked
+            };
+            super::track::handle_remove_input(&bot, &msg, db, user_id, input, mode).await?;
         }
         ACTION_MANAGE_AUTH_KEY => {
             super::manage::handle_auth_key_input(

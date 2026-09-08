@@ -470,11 +470,12 @@ mod tests {
             .expect("run migrations");
 
         let user_id = db::ensure_user(&pool, 123, 456).await.expect("insert user");
-        db::add_tracked_wallet(
+        db::save_wallet(
             &pool,
             user_id,
             "0xabababababababababababababababababababab",
             None,
+            db::WalletMode::Tracked,
         )
         .await
         .expect("track wallet");
@@ -507,7 +508,7 @@ mod tests {
             .expect("poll");
 
         assert!(notifier.sent.lock().expect("sent").is_empty());
-        let wallets = db::list_tracked_wallets(&db, wallet.user_id)
+        let wallets = db::list_wallets(&db, wallet.user_id, db::WalletMode::Tracked)
             .await
             .expect("list");
         assert_eq!(wallets[0].last_activity_hash.as_deref(), Some(TX1));
@@ -545,6 +546,53 @@ mod tests {
             .await
             .expect("repeat poll");
         assert_eq!(notifier.sent.lock().expect("sent").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archived_wallet_stops_delivery_and_restore_skips_archived_activity() {
+        let (db, mut wallet) = setup_poll_db().await;
+        let data = FakeData {
+            activities: std::sync::Mutex::new(vec![test_activity(TX2), test_activity(TX1)]),
+        };
+        let notifier = FakeNotifier::default();
+        let address = Address::from_str(&wallet.wallet_address).unwrap();
+        wallet.last_activity_hash = Some(TX1.to_string());
+        db::save_wallet(
+            &db,
+            wallet.user_id,
+            &wallet.wallet_address,
+            None,
+            db::WalletMode::Archived,
+        )
+        .await
+        .unwrap();
+        poll_activity(&notifier, &data, &db, &wallet, address, false)
+            .await
+            .unwrap();
+        assert!(notifier.sent.lock().unwrap().is_empty());
+        db::save_wallet(
+            &db,
+            wallet.user_id,
+            &wallet.wallet_address,
+            None,
+            db::WalletMode::Tracked,
+        )
+        .await
+        .unwrap();
+        let restored = db::list_tracked_wallets_with_users(&db)
+            .await
+            .unwrap()
+            .remove(0);
+        poll_activity(&notifier, &data, &db, &restored, address, false)
+            .await
+            .unwrap();
+        assert!(notifier.sent.lock().unwrap().is_empty());
+        assert_eq!(
+            db::list_tracked_wallets_with_users(&db).await.unwrap()[0]
+                .last_activity_hash
+                .as_deref(),
+            Some(TX2)
+        );
     }
 
     #[tokio::test]
@@ -906,6 +954,9 @@ async fn poll_activity(
     address: Address,
     copy_trade_enabled: bool,
 ) -> color_eyre::eyre::Result<()> {
+    if !db::is_wallet_tracked(db, wallet.user_id, &wallet.wallet_address).await? {
+        return Ok(());
+    }
     let request = ActivityRequest::builder()
         .user(address)
         .limit(ACTIVITY_PAGE_LIMIT)?
@@ -965,6 +1016,9 @@ async fn poll_activity(
     }
 
     for activity in new_events.into_iter().rev() {
+        if !db::is_wallet_tracked(db, wallet.user_id, &wallet.wallet_address).await? {
+            return Ok(());
+        }
         let notification = ActivityNotification::from_activity(activity);
         let details = serde_json::to_string(&notification).ok();
 
@@ -1025,6 +1079,9 @@ async fn poll_positions(
     wallet: &db::TrackedWalletWithUser,
     address: Address,
 ) -> color_eyre::eyre::Result<()> {
+    if !db::is_wallet_tracked(db, wallet.user_id, &wallet.wallet_address).await? {
+        return Ok(());
+    }
     let request = PositionsRequest::builder()
         .user(address)
         .limit(POSITIONS_PAGE_LIMIT)?

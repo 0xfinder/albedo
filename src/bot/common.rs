@@ -4,6 +4,9 @@ use teloxide::prelude::*;
 
 pub(crate) const ACTION_TRACK_ADD_ADDRESS: &str = "track_add_address";
 pub(crate) const ACTION_TRACK_ADD_LABEL: &str = "track_add_label";
+pub(crate) const ACTION_ARCHIVE_ADD_ADDRESS: &str = "archive_add_address";
+pub(crate) const ACTION_ARCHIVE_ADD_LABEL: &str = "archive_add_label";
+pub(crate) const ACTION_ARCHIVE_REMOVE: &str = "archive_remove";
 pub(crate) const ACTION_TRACK_REMOVE: &str = "track_remove";
 pub(crate) const ACTION_MANAGE_AUTH_KEY: &str = "manage_auth_key";
 pub(crate) const ACTION_MANAGE_AUTH_LABEL: &str = "manage_auth_label";

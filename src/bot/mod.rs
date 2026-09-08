@@ -46,6 +46,7 @@ fn bot_commands() -> Vec<BotCommand> {
     vec![
         BotCommand::new("start", "Open the main menu"),
         BotCommand::new("help", "Show help"),
+        BotCommand::new("archive", "Save wallets without monitoring"),
         BotCommand::new("track", "Open the track menu"),
         BotCommand::new("manage", "Open the manage menu"),
         BotCommand::new("version", "Show the bot version"),

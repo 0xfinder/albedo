@@ -184,40 +184,63 @@ pub async fn get_pending_state(db: &Db, user_id: i64) -> Result<(Option<String>,
     Ok((action, data))
 }
 
-/// Track a wallet; returns `false` if it was already tracked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalletMode {
+    Tracked,
+    Archived,
+}
+
+impl WalletMode {
+    pub fn is_archived(self) -> bool {
+        self == Self::Archived
+    }
+}
+
+/// Save or move a wallet; returns `false` if it is already in this list.
+/// Moving preserves its label unless a replacement is supplied and resets cursors.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn add_tracked_wallet(
+pub async fn save_wallet(
     db: &Db,
     user_id: i64,
     wallet_address: &str,
     label: Option<&str>,
+    mode: WalletMode,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "INSERT INTO tracked_wallets (user_id, wallet_address, label) VALUES (?, ?, ?)\
-         ON CONFLICT(user_id, wallet_address) DO NOTHING",
+        "INSERT INTO tracked_wallets (user_id, wallet_address, label, archived) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(user_id, wallet_address) DO UPDATE SET \
+         archived = excluded.archived, label = COALESCE(excluded.label, tracked_wallets.label), \
+         last_activity_hash = NULL, last_positions_hash = NULL \
+         WHERE tracked_wallets.archived != excluded.archived",
     )
     .bind(user_id)
     .bind(wallet_address)
     .bind(label)
+    .bind(mode.is_archived())
     .execute(db)
     .await?;
 
     Ok(result.rows_affected() > 0)
 }
 
-/// List the wallets one user tracks, oldest first.
+/// List one user's wallets in the selected list, oldest first.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn list_tracked_wallets(db: &Db, user_id: i64) -> Result<Vec<models::TrackedWallet>> {
+pub async fn list_wallets(
+    db: &Db,
+    user_id: i64,
+    mode: WalletMode,
+) -> Result<Vec<models::TrackedWallet>> {
     let wallets = sqlx::query_as::<_, models::TrackedWallet>(
-        "SELECT id, user_id, wallet_address, label, last_activity_hash, last_positions_hash, created_at FROM tracked_wallets WHERE user_id = ? ORDER BY created_at",
+        "SELECT id, user_id, wallet_address, label, last_activity_hash, last_positions_hash, created_at FROM tracked_wallets WHERE user_id = ? AND archived = ? ORDER BY created_at, id",
     )
     .bind(user_id)
+    .bind(mode.is_archived())
     .fetch_all(db)
     .await?;
 
@@ -346,7 +369,7 @@ pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalle
         "SELECT tracked_wallets.user_id, users.chat_id, users.telegram_id, tracked_wallets.wallet_address, \
          tracked_wallets.label, tracked_wallets.last_activity_hash, tracked_wallets.last_positions_hash \
          FROM tracked_wallets \
-         INNER JOIN users ON users.id = tracked_wallets.user_id",
+         INNER JOIN users ON users.id = tracked_wallets.user_id WHERE tracked_wallets.archived = 0",
     )
     .fetch_all(db)
     .await?;
@@ -354,20 +377,55 @@ pub async fn list_tracked_wallets_with_users(db: &Db) -> Result<Vec<TrackedWalle
     Ok(wallets)
 }
 
-/// Stop tracking a wallet; `false` means it was not tracked.
+/// Delete a wallet from the selected list; `false` means no matching wallet.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the database is unreachable.
-pub async fn remove_tracked_wallet(db: &Db, user_id: i64, wallet_address: &str) -> Result<bool> {
-    let result =
-        sqlx::query("DELETE FROM tracked_wallets WHERE user_id = ? AND wallet_address = ?")
-            .bind(user_id)
-            .bind(wallet_address)
-            .execute(db)
-            .await?;
+pub async fn remove_wallet(
+    db: &Db,
+    user_id: i64,
+    wallet_address: &str,
+    mode: WalletMode,
+) -> Result<bool> {
+    let result = sqlx::query(
+        "DELETE FROM tracked_wallets WHERE user_id = ? AND wallet_address = ? AND archived = ?",
+    )
+    .bind(user_id)
+    .bind(wallet_address)
+    .bind(mode.is_archived())
+    .execute(db)
+    .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+/// Move an existing wallet between lists, preserving its label.
+///
+/// # Errors
+/// Returns `Err` if the database is unreachable.
+pub async fn move_wallet(db: &Db, user_id: i64, wallet_id: i64, mode: WalletMode) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE tracked_wallets SET archived = ?, last_activity_hash = NULL, last_positions_hash = NULL \
+         WHERE id = ? AND user_id = ? AND archived != ?",
+    )
+    .bind(mode.is_archived())
+    .bind(wallet_id)
+    .bind(user_id)
+    .bind(mode.is_archived())
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Check whether a wallet is still monitored before using a polling snapshot.
+///
+/// # Errors
+/// Returns `Err` if the database is unreachable.
+pub async fn is_wallet_tracked(db: &Db, user_id: i64, wallet_address: &str) -> Result<bool> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM tracked_wallets WHERE user_id = ? AND wallet_address = ? AND archived = 0)",
+    ).bind(user_id).bind(wallet_address).fetch_one(db).await?)
 }
 
 async fn update_tracked_wallet_hash(
@@ -377,8 +435,9 @@ async fn update_tracked_wallet_hash(
     hash: Option<&str>,
     column: &str,
 ) -> Result<()> {
-    let query =
-        format!("UPDATE tracked_wallets SET {column} = ? WHERE user_id = ? AND wallet_address = ?");
+    let query = format!(
+        "UPDATE tracked_wallets SET {column} = ? WHERE user_id = ? AND wallet_address = ? AND archived = 0"
+    );
     sqlx::query(&query)
         .bind(hash)
         .bind(user_id)
@@ -596,6 +655,156 @@ mod tests {
 
         let user_id = ensure_user(&pool, 123, 456).await.expect("insert user");
         (pool, user_id)
+    }
+
+    #[tokio::test]
+    async fn archive_preserves_wallet_and_excludes_it_from_monitoring() {
+        let (db, user) = setup_db().await;
+        // An insert using the old schema's columns remains tracked after migration.
+        sqlx::query("INSERT INTO tracked_wallets (user_id, wallet_address, label) VALUES (?, '0xabc', 'Alice')")
+            .bind(user).execute(&db).await.unwrap();
+        assert_eq!(list_tracked_wallets_with_users(&db).await.unwrap().len(), 1);
+        update_tracked_wallet_activity_hash(&db, user, "0xabc", Some("old"))
+            .await
+            .unwrap();
+        update_tracked_wallet_positions_hash(&db, user, "0xabc", Some("positions"))
+            .await
+            .unwrap();
+        let original = list_wallets(&db, user, WalletMode::Tracked)
+            .await
+            .unwrap()
+            .remove(0);
+        assert!(
+            save_wallet(&db, user, "0xabc", None, WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !save_wallet(&db, user, "0xabc", Some("Duplicate"), WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert!(
+            list_wallets(&db, user, WalletMode::Tracked)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            list_tracked_wallets_with_users(&db)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!is_wallet_tracked(&db, user, "0xabc").await.unwrap());
+        // A poll started before archiving cannot write its cursor into the archive.
+        update_tracked_wallet_activity_hash(&db, user, "0xabc", Some("late"))
+            .await
+            .unwrap();
+        let archived = list_wallets(&db, user, WalletMode::Archived)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(archived.id, original.id);
+        assert_eq!(archived.created_at, original.created_at);
+        assert_eq!(archived.label.as_deref(), Some("Alice"));
+        assert!(archived.last_activity_hash.is_none());
+        assert!(archived.last_positions_hash.is_none());
+        assert!(
+            move_wallet(&db, user, archived.id, WalletMode::Tracked)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !move_wallet(&db, user, archived.id, WalletMode::Tracked)
+                .await
+                .unwrap()
+        );
+        let restored = list_wallets(&db, user, WalletMode::Tracked)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(restored.label.as_deref(), Some("Alice"));
+        assert!(restored.last_activity_hash.is_none());
+        assert!(restored.last_positions_hash.is_none());
+        assert_eq!(list_tracked_wallets_with_users(&db).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archive_actions_are_scoped_to_user_and_list() {
+        let (db, user) = setup_db().await;
+        let other = ensure_user(&db, 999, 999).await.unwrap();
+        assert!(
+            save_wallet(&db, user, "0xabc", Some("Saved"), WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert!(
+            save_wallet(&db, other, "0xabc", Some("Other"), WalletMode::Tracked)
+                .await
+                .unwrap()
+        );
+        let wallet = list_wallets(&db, user, WalletMode::Archived)
+            .await
+            .unwrap()
+            .remove(0);
+        assert!(
+            !move_wallet(&db, other, wallet.id, WalletMode::Tracked)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !remove_wallet(&db, user, "0xabc", WalletMode::Tracked)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !remove_wallet(&db, other, "0xabc", WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert!(
+            save_wallet(&db, user, "0xabc", None, WalletMode::Tracked)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            list_wallets(&db, user, WalletMode::Tracked).await.unwrap()[0]
+                .label
+                .as_deref(),
+            Some("Saved")
+        );
+        assert!(
+            save_wallet(&db, user, "0xabc", Some("Renamed"), WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            list_wallets(&db, user, WalletMode::Archived).await.unwrap()[0]
+                .label
+                .as_deref(),
+            Some("Renamed")
+        );
+        assert!(
+            remove_wallet(&db, user, "0xabc", WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !remove_wallet(&db, user, "0xabc", WalletMode::Archived)
+                .await
+                .unwrap()
+        );
+        assert!(
+            list_wallets(&db, user, WalletMode::Archived)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            list_tracked_wallets_with_users(&db).await.unwrap()[0].user_id,
+            other
+        );
     }
 
     #[tokio::test]
