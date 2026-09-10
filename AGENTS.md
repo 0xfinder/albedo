@@ -11,6 +11,7 @@ This file provides guidance for automated agents working in this repo.
 - Keep commits small and focused on a single purpose.
 - Use Conventional Commits (e.g., `feat: ...`, `fix: ...`, `docs: ...`).
 - Avoid bundling refactors with functional changes unless required.
+- Before committing, run `cargo clippy --all-targets --all-features -- -D warnings` and fix all errors.
 
 ## Versioning and releases
 - Follow Semantic Versioning (MAJOR.MINOR.PATCH):
@@ -25,9 +26,11 @@ This file provides guidance for automated agents working in this repo.
 - The version is embedded at build time (`src/main.rs` `VERSION`) and shown by `/version` and on startup.
 
 ## Code quality
+- Follow [Microsoft's Pragmatic Rust Guidelines](https://microsoft.github.io/rust-guidelines/).
 - Match existing formatting and naming conventions.
 - Add comments only when behavior is non-obvious.
 - Update or add documentation when behavior changes.
+- Silence a lint with `#[expect(..., reason = "...")]`, never `#[allow]`.
 
 ## Tests
 - Run relevant tests when changes are non-trivial.
