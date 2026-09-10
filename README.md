@@ -9,6 +9,20 @@ Personal Telegram bot because the Polymarket UI sucks.
 - **Manage wallets**: Store encrypted private keys to place orders directly from Telegram
 - Real-time notifications for trades and position updates
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/track-menu.png" alt="Track wallets menu with add, remove, view all, and archive options" width="333">
+  &nbsp;&nbsp;
+  <img src="docs/images/buy-trade.png" alt="Trade notification for a filled buy order" width="594">
+</p>
+
+<p align="center">
+  <img src="docs/images/closed-trade.png" alt="Trade notification for a closed position" width="612">
+  &nbsp;&nbsp;
+  <img src="docs/images/positions-summary.png" alt="Position summary for a match, showing both outcomes and the payout for each" width="315">
+</p>
+
 ## Requirements
 
 - Rust (1.88+)
@@ -76,8 +90,6 @@ Start a conversation with your bot on Telegram and use `/start` to see the menu.
 - In the tracked wallet list, tap **Archive** to save a wallet with one tap
 - In **View archive**, tap **Start tracking** to restore monitoring. Activity from the archived period is not replayed; the next poll establishes a fresh baseline
 - Use **Delete address** to remove a saved wallet from the archive
-
-Database migrations run automatically on startup. Existing wallets remain tracked.
 
 ### Manage Mode
 - Authenticate with your private key (encrypted and stored locally)
