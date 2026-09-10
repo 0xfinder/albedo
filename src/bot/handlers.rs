@@ -20,7 +20,7 @@ use super::common::{
     ACTION_MANAGE_AUTH_LABEL, ACTION_MANAGE_CANCEL_ORDER, ACTION_MANAGE_LIMIT_ORDER,
     ACTION_MANAGE_MARKET_ORDER, ACTION_MANAGE_POSITIONS, ACTION_TRACK_ADD_ADDRESS,
     ACTION_TRACK_ADD_LABEL, ACTION_TRACK_REMOVE, MSG_ACTION_EXPIRED, SIG_EOA, SIG_PROXY,
-    callback_chat_id, log_db_error,
+    callback_chat_id, log_db_error, telegram_user_id,
 };
 
 use super::copy_trade::{
@@ -70,7 +70,7 @@ pub async fn handle_message(
         return Ok(());
     };
 
-    if !allowed_telegram_ids.is_allowed(user.id.0 as i64) {
+    if !allowed_telegram_ids.is_allowed(telegram_user_id(user.id.0)) {
         bot.send_message(
             msg.chat.id,
             format!(
@@ -82,7 +82,7 @@ pub async fn handle_message(
         return Ok(());
     }
 
-    let telegram_id = user.id.0 as i64;
+    let telegram_id = telegram_user_id(user.id.0);
     let chat_id = msg.chat.id.0;
     let user_id = match db::ensure_user(&db, telegram_id, chat_id).await {
         Ok(user_id) => user_id,
@@ -102,7 +102,14 @@ pub async fn handle_message(
             "clear_pending_state",
             user_id,
         );
-        return handle_top_level_command(bot, msg, &db, user_id, command.as_str()).await;
+        return Box::pin(handle_top_level_command(
+            bot,
+            msg,
+            &db,
+            user_id,
+            command.as_str(),
+        ))
+        .await;
     }
 
     match db::get_pending_state(&db, user_id).await {
@@ -113,9 +120,11 @@ pub async fn handle_message(
                 msg,
                 &db,
                 user_id,
-                action.as_str(),
-                data.as_deref(),
-                text.as_str(),
+                PendingAction {
+                    action: action.as_str(),
+                    data: data.as_deref(),
+                    input: text.as_str(),
+                },
                 encryption_key,
             )
             .await;
@@ -134,6 +143,12 @@ pub async fn handle_message(
 }
 
 /// Handle an inline-button callback: menus, positions, or copy-trade flow.
+// A flat dispatch over every action key. The arms are independent, so
+// splitting them into helpers would scatter one decision table.
+#[expect(
+    clippy::too_many_lines,
+    reason = "single dispatch table over action keys"
+)]
 pub async fn handle_callback(
     bot: Bot,
     query: CallbackQuery,
@@ -142,14 +157,14 @@ pub async fn handle_callback(
     let db = state.db.clone();
     let encryption_key = state.config.encryption_key.clone();
     let allowed_telegram_ids = &state.config.allowed_telegram_ids;
-    if let Some(message) = query.message.as_ref() {
-        if !message.chat().is_private() {
-            bot.answer_callback_query(query.id).await?;
-            return Ok(());
-        }
+    if let Some(message) = query.message.as_ref()
+        && !message.chat().is_private()
+    {
+        bot.answer_callback_query(query.id).await?;
+        return Ok(());
     }
 
-    if !allowed_telegram_ids.is_allowed(query.from.id.0 as i64) {
+    if !allowed_telegram_ids.is_allowed(telegram_user_id(query.from.id.0)) {
         bot.answer_callback_query(query.id)
             .text(format!(
                 "⛔ Not authorized. Your Telegram ID: {}",
@@ -167,10 +182,11 @@ pub async fn handle_callback(
     let chat_id = query
         .message
         .as_ref()
-        .map(|message| message.chat().id.0)
-        .unwrap_or(query.from.id.0 as i64);
+        .map_or(telegram_user_id(query.from.id.0), |message| {
+            message.chat().id.0
+        });
 
-    let user_id = match db::ensure_user(&db, query.from.id.0 as i64, chat_id).await {
+    let user_id = match db::ensure_user(&db, telegram_user_id(query.from.id.0), chat_id).await {
         Ok(user_id) => user_id,
         Err(_err) => {
             bot.answer_callback_query(query.id).await?;
@@ -606,112 +622,109 @@ pub async fn handle_callback(
         }
         data if data.starts_with("ct:") => {
             let chat_id = callback_chat_id(&query);
-            if let Some(id_str) = data.strip_prefix("ct:") {
-                if let Ok(cb_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_init(&bot, chat_id, &db, user_id, cb_id).await?;
-                }
+            if let Some(id_str) = data.strip_prefix("ct:")
+                && let Ok(cb_id) = id_str.parse::<i64>()
+            {
+                handle_copy_trade_init(&bot, chat_id, &db, user_id, cb_id).await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_confirm:") => {
             let chat_id = callback_chat_id(&query);
-            if let Some(id_str) = data.strip_prefix("ct_confirm:") {
-                if let Ok(ct_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_confirm(
-                        &bot,
-                        chat_id,
-                        &db,
-                        user_id,
-                        ct_id,
-                        encryption_key.clone(),
-                    )
-                    .await?;
-                }
+            if let Some(id_str) = data.strip_prefix("ct_confirm:")
+                && let Ok(ct_id) = id_str.parse::<i64>()
+            {
+                handle_copy_trade_confirm(
+                    &bot,
+                    chat_id,
+                    &db,
+                    user_id,
+                    ct_id,
+                    encryption_key.clone(),
+                )
+                .await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_cancel:") => {
             let chat_id = callback_chat_id(&query);
-            if let Some(id_str) = data.strip_prefix("ct_cancel:") {
-                if let Ok(ct_id) = id_str.parse::<i64>() {
-                    if load_owned_copy_trade_state(&bot, chat_id, &db, user_id, ct_id)
-                        .await
-                        .is_some()
-                    {
-                        log_db_error(
-                            db::delete_copy_trade_state(&db, ct_id).await,
-                            "delete_copy_trade_state",
-                            user_id,
-                        );
-                        log_db_error(
-                            db::clear_pending_state(&db, user_id).await,
-                            "clear_pending_state",
-                            user_id,
-                        );
-                        bot.send_message(chat_id, "Copy trade cancelled.").await?;
-                    }
-                }
+            if let Some(id_str) = data.strip_prefix("ct_cancel:")
+                && let Ok(ct_id) = id_str.parse::<i64>()
+                && load_owned_copy_trade_state(&bot, chat_id, &db, user_id, ct_id)
+                    .await
+                    .is_some()
+            {
+                log_db_error(
+                    db::delete_copy_trade_state(&db, ct_id).await,
+                    "delete_copy_trade_state",
+                    user_id,
+                );
+                log_db_error(
+                    db::clear_pending_state(&db, user_id).await,
+                    "clear_pending_state",
+                    user_id,
+                );
+                bot.send_message(chat_id, "Copy trade cancelled.").await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_flip:") => {
             let chat_id = callback_chat_id(&query);
-            if let Some(id_str) = data.strip_prefix("ct_flip:") {
-                if let Ok(ct_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_flip(&bot, chat_id, &db, user_id, ct_id, &query).await?;
-                }
+            if let Some(id_str) = data.strip_prefix("ct_flip:")
+                && let Ok(ct_id) = id_str.parse::<i64>()
+            {
+                handle_copy_trade_flip(&bot, chat_id, &db, user_id, ct_id, &query).await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_market:") => {
             let chat_id = callback_chat_id(&query);
-            if let Some(id_str) = data.strip_prefix("ct_market:") {
-                if let Ok(ct_id) = id_str.parse::<i64>() {
-                    handle_copy_trade_toggle_type(&bot, chat_id, &db, user_id, ct_id, &query)
-                        .await?;
-                }
+            if let Some(id_str) = data.strip_prefix("ct_market:")
+                && let Ok(ct_id) = id_str.parse::<i64>()
+            {
+                handle_copy_trade_toggle_type(&bot, chat_id, &db, user_id, ct_id, &query).await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_price:") => {
-            if let Some(id_str) = data.strip_prefix("ct_price:") {
-                if let Ok(ct_id) = id_str.parse::<i64>() {
-                    log_db_error(
-                        db::set_pending_state(
-                            &db,
-                            user_id,
-                            Some(ACTION_COPY_TRADE_EDIT_PRICE),
-                            Some(&ct_id.to_string()),
-                        )
-                        .await,
-                        "set_pending_state",
+            if let Some(id_str) = data.strip_prefix("ct_price:")
+                && let Ok(ct_id) = id_str.parse::<i64>()
+            {
+                log_db_error(
+                    db::set_pending_state(
+                        &db,
                         user_id,
-                    );
-                    let chat_id = callback_chat_id(&query);
-                    bot.send_message(chat_id, "Send the new price (e.g., 0.47):")
-                        .await?;
-                }
+                        Some(ACTION_COPY_TRADE_EDIT_PRICE),
+                        Some(&ct_id.to_string()),
+                    )
+                    .await,
+                    "set_pending_state",
+                    user_id,
+                );
+                let chat_id = callback_chat_id(&query);
+                bot.send_message(chat_id, "Send the new price (e.g., 0.47):")
+                    .await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
         data if data.starts_with("ct_size:") => {
-            if let Some(id_str) = data.strip_prefix("ct_size:") {
-                if let Ok(ct_id) = id_str.parse::<i64>() {
-                    log_db_error(
-                        db::set_pending_state(
-                            &db,
-                            user_id,
-                            Some(ACTION_COPY_TRADE_EDIT_SIZE),
-                            Some(&ct_id.to_string()),
-                        )
-                        .await,
-                        "set_pending_state",
+            if let Some(id_str) = data.strip_prefix("ct_size:")
+                && let Ok(ct_id) = id_str.parse::<i64>()
+            {
+                log_db_error(
+                    db::set_pending_state(
+                        &db,
                         user_id,
-                    );
-                    let chat_id = callback_chat_id(&query);
-                    bot.send_message(chat_id, "Send the new size (number of shares):")
-                        .await?;
-                }
+                        Some(ACTION_COPY_TRADE_EDIT_SIZE),
+                        Some(&ct_id.to_string()),
+                    )
+                    .await,
+                    "set_pending_state",
+                    user_id,
+                );
+                let chat_id = callback_chat_id(&query);
+                bot.send_message(chat_id, "Send the new size (number of shares):")
+                    .await?;
             }
             bot.answer_callback_query(query.id).await?;
         }
@@ -781,17 +794,27 @@ async fn handle_help(bot: Bot, msg: Message) -> ResponseResult<()> {
     Ok(())
 }
 
+/// A stored pending action plus the message the user sent in reply to it.
+struct PendingAction<'a> {
+    action: &'a str,
+    data: Option<&'a str>,
+    input: &'a str,
+}
+
 async fn handle_pending_action(
     bot: Bot,
     client: &DataClient,
     msg: Message,
     db: &Db,
     user_id: i64,
-    action: &str,
-    data: Option<&str>,
-    input: &str,
+    pending: PendingAction<'_>,
     encryption_key: Option<EncryptionKey>,
 ) -> ResponseResult<()> {
+    let PendingAction {
+        action,
+        data,
+        input,
+    } = pending;
     match action {
         ACTION_TRACK_ADD_ADDRESS | ACTION_ARCHIVE_ADD_ADDRESS => {
             let mode = if action == ACTION_ARCHIVE_ADD_ADDRESS {
@@ -827,31 +850,45 @@ async fn handle_pending_action(
                 input,
                 encryption_key,
             )
-            .await?
+            .await?;
         }
         ACTION_MANAGE_AUTH_LABEL => {
-            super::manage::handle_auth_label_input(&bot, &msg, db, user_id, data, input).await?
+            super::manage::handle_auth_label_input(&bot, &msg, db, user_id, data, input).await?;
         }
         ACTION_MANAGE_POSITIONS => {
-            super::manage::handle_positions_input(&bot, client, &msg, db, user_id).await?
+            super::manage::handle_positions_input(&bot, client, &msg, db, user_id).await?;
         }
         ACTION_MANAGE_MARKET_ORDER => {
-            super::orders::handle_market_order_input(&bot, &msg, db, user_id, input, encryption_key)
-                .await?
+            super::orders::handle_market_order_input(
+                &bot,
+                &msg,
+                db,
+                user_id,
+                input,
+                encryption_key,
+            )
+            .await?;
         }
         ACTION_MANAGE_LIMIT_ORDER => {
             super::orders::handle_limit_order_input(&bot, &msg, db, user_id, input, encryption_key)
-                .await?
+                .await?;
         }
         ACTION_MANAGE_CANCEL_ORDER => {
-            super::orders::handle_cancel_order_input(&bot, &msg, db, user_id, input, encryption_key)
-                .await?
+            super::orders::handle_cancel_order_input(
+                &bot,
+                &msg,
+                db,
+                user_id,
+                input,
+                encryption_key,
+            )
+            .await?;
         }
         ACTION_COPY_TRADE_EDIT_PRICE => {
-            super::copy_trade::handle_price_input(&bot, &msg, db, user_id, data, input).await?
+            super::copy_trade::handle_price_input(&bot, &msg, db, user_id, data, input).await?;
         }
         ACTION_COPY_TRADE_EDIT_SIZE => {
-            super::copy_trade::handle_size_input(&bot, &msg, db, user_id, data, input).await?
+            super::copy_trade::handle_size_input(&bot, &msg, db, user_id, data, input).await?;
         }
         _ => {
             log_db_error(

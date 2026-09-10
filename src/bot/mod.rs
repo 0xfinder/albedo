@@ -32,12 +32,15 @@ pub async fn start(state: Arc<AppState>) -> color_eyre::eyre::Result<()> {
         .branch(Update::filter_message().endpoint(handlers::handle_message))
         .branch(Update::filter_callback_query().endpoint(handlers::handle_callback));
 
-    Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![state, bot_name])
-        .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
+    // The dispatcher future is large, so keep it off the stack.
+    Box::pin(
+        Dispatcher::builder(bot, handler)
+            .dependencies(dptree::deps![state, bot_name])
+            .enable_ctrlc_handler()
+            .build()
+            .dispatch(),
+    )
+    .await;
 
     Ok(())
 }

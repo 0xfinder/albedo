@@ -85,7 +85,6 @@ pub(crate) fn format_signature_type(signature_type: SignatureType) -> &'static s
     match signature_type {
         SignatureType::Proxy => "Email/Google login (Magic)",
         SignatureType::GnosisSafe => "Gnosis Safe",
-        SignatureType::Eoa => "Standard wallet (MetaMask/Ledger)",
         _ => "Standard wallet (MetaMask/Ledger)",
     }
 }
@@ -139,7 +138,7 @@ pub(crate) fn html_escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bot::common::{SIG_EOA, SIG_PROXY};
+    use crate::bot::common::SIG_EOA;
 
     #[test]
     fn parse_signature_type_defaults_to_eoa() {

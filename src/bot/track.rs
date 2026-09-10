@@ -154,7 +154,7 @@ pub(crate) async fn handle_address_input(
         } else {
             ACTION_TRACK_ADD_LABEL
         }),
-        Some(&wallet_address),
+        Some(wallet_address),
     )
     .await
     {
@@ -199,7 +199,7 @@ pub(crate) async fn handle_label_input(
     }
 
     finalize_wallet_add(
-        &bot,
+        bot,
         msg.chat.id,
         db,
         user_id,
@@ -228,7 +228,7 @@ pub(crate) async fn handle_remove_input(
         return Ok(());
     };
     let wallet_address = wallet_address.as_str();
-    let removed = match db::remove_wallet(db, user_id, &wallet_address, mode).await {
+    let removed = match db::remove_wallet(db, user_id, wallet_address, mode).await {
         Ok(removed) => removed,
         Err(_err) => {
             bot.send_message(
@@ -264,6 +264,6 @@ pub(crate) async fn handle_remove_input(
             .await?;
     }
 
-    send_wallet_menu(&bot, msg.chat.id, mode).await?;
+    send_wallet_menu(bot, msg.chat.id, mode).await?;
     Ok(())
 }

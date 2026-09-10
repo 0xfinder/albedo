@@ -1,5 +1,6 @@
 //! Managed-wallet menus: setup, positions, orders, and removal.
 
+use std::fmt::Write as _;
 use std::str::FromStr;
 
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
@@ -64,21 +65,19 @@ pub(crate) async fn send_managed_positions(
         return Ok(());
     };
 
-    let signer_address = match Address::from_str(&managed_wallet.wallet_address) {
-        Ok(address) => address,
-        Err(_) => {
-            bot.send_message(chat_id, "That wallet address is invalid.")
-                .await?;
-            send_manage_menu(bot, chat_id).await?;
-            return Ok(());
-        }
+    let Ok(signer_address) = Address::from_str(&managed_wallet.wallet_address) else {
+        bot.send_message(chat_id, "That wallet address is invalid.")
+            .await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
     };
 
     let signature_type = signature_type_from_db(managed_wallet.signature_type);
     let address = match signature_type {
-        SignatureType::Proxy => match derive_proxy_wallet(signer_address, POLYGON) {
-            Some(proxy) => proxy,
-            None => {
+        SignatureType::Proxy => {
+            if let Some(proxy) = derive_proxy_wallet(signer_address, POLYGON) {
+                proxy
+            } else {
                 bot.send_message(
                     chat_id,
                     "Proxy wallet derivation is not supported on this chain.",
@@ -87,32 +86,26 @@ pub(crate) async fn send_managed_positions(
                 send_manage_menu(bot, chat_id).await?;
                 return Ok(());
             }
-        },
+        }
         _ => signer_address,
     };
 
-    let builder = match PositionsRequest::builder()
+    let Ok(builder) = PositionsRequest::builder()
         .user(address)
         .limit(POSITIONS_PAGE_LIMIT)
-    {
-        Ok(builder) => builder,
-        Err(_) => {
-            bot.send_message(chat_id, "Sorry, I couldn't build that request.")
-                .await?;
-            send_manage_menu(bot, chat_id).await?;
-            return Ok(());
-        }
+    else {
+        bot.send_message(chat_id, "Sorry, I couldn't build that request.")
+            .await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
     };
     let request = builder.build();
 
-    let positions = match client.fetch_positions(&request).await {
-        Ok(positions) => positions,
-        Err(_) => {
-            bot.send_message(chat_id, "Sorry, I couldn't fetch positions.")
-                .await?;
-            send_manage_menu(bot, chat_id).await?;
-            return Ok(());
-        }
+    let Ok(positions) = client.fetch_positions(&request).await else {
+        bot.send_message(chat_id, "Sorry, I couldn't fetch positions.")
+            .await?;
+        send_manage_menu(bot, chat_id).await?;
+        return Ok(());
     };
 
     let label = managed_wallet
@@ -172,12 +165,11 @@ pub(crate) async fn send_managed_wallet(
     let wallet_type_label = format_signature_type(signature_type);
     let mut message = format!("Managed wallet:\n{line}\nType: {wallet_type_label}");
 
-    if signature_type == SignatureType::Proxy {
-        if let Ok(address) = Address::from_str(&wallet.wallet_address) {
-            if let Some(proxy) = derive_proxy_wallet(address, POLYGON) {
-                message.push_str(&format!("\nProxy address: {proxy}"));
-            }
-        }
+    if signature_type == SignatureType::Proxy
+        && let Ok(address) = Address::from_str(&wallet.wallet_address)
+        && let Some(proxy) = derive_proxy_wallet(address, POLYGON)
+    {
+        write!(message, "\nProxy address: {proxy}").expect("writing to a String cannot fail");
     }
 
     bot.send_message(chat_id, message).await?;
@@ -317,12 +309,12 @@ pub(crate) async fn finalize_manage_label(
     wallet_address: &str,
     label: Option<&str>,
 ) -> ResponseResult<()> {
-    if let Some(label) = label {
-        if let Err(_err) = db::update_managed_wallet_label(db, user_id, Some(label)).await {
-            bot.send_message(chat_id, "Sorry, I couldn't update that wallet.")
-                .await?;
-            return Ok(());
-        }
+    if let Some(label) = label
+        && let Err(_err) = db::update_managed_wallet_label(db, user_id, Some(label)).await
+    {
+        bot.send_message(chat_id, "Sorry, I couldn't update that wallet.")
+            .await?;
+        return Ok(());
     }
 
     log_db_error(
@@ -504,6 +496,10 @@ pub(crate) fn build_directional_summary(positions: &[&Position]) -> Option<Strin
     ))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "position rendering and paging share one message buffer"
+)]
 pub(crate) async fn handle_show_positions(
     bot: &Bot,
     client: &impl crate::monitoring::DataApi,
@@ -524,75 +520,62 @@ pub(crate) async fn handle_show_positions(
         }
         _ => None,
     };
-    let wallet_address = match callback_data.as_ref() {
-        Some(data) => data.wallet_address.clone(),
-        None => {
-            let wallet = source_message
-                .and_then(|message| message.regular_message())
-                .and_then(|message| message.text())
-                .and_then(|text| WalletAddress::extract(text).map(|address| address.to_string()));
-            match wallet {
-                Some(wallet) => wallet,
-                None => {
-                    bot.send_message(
-                        chat_id,
-                        "Could not load position data. This button may be outdated; try a newer activity message.",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
+    let wallet_address = if let Some(data) = callback_data.as_ref() {
+        data.wallet_address.clone()
+    } else {
+        let wallet = source_message
+            .and_then(|message| message.regular_message())
+            .and_then(|message| message.text())
+            .and_then(|text| WalletAddress::extract(text).map(|address| address.to_string()));
+        if let Some(wallet) = wallet {
+            wallet
+        } else {
+            bot.send_message(
+                chat_id,
+                "Could not load position data. This button may be outdated; try a newer activity message.",
+            )
+            .await?;
+            return Ok(());
         }
     };
     let condition_id = callback_data
         .as_ref()
         .and_then(|data| B256::from_str(&data.condition_id).ok());
 
-    let address = match Address::from_str(&wallet_address) {
-        Ok(addr) => addr,
-        Err(_) => {
-            bot.send_message(chat_id, "Invalid wallet address.").await?;
-            return Ok(());
-        }
+    let Ok(address) = Address::from_str(&wallet_address) else {
+        bot.send_message(chat_id, "Invalid wallet address.").await?;
+        return Ok(());
     };
 
-    let request = match condition_id {
-        Some(condition_id) => {
-            let builder = PositionsRequest::builder()
-                .user(address)
-                .filter(MarketFilter::markets([condition_id]))
-                .limit(POSITIONS_PAGE_LIMIT);
-            match builder {
-                Ok(builder) => builder.build(),
-                Err(_) => {
-                    bot.send_message(chat_id, "Could not build positions request.")
-                        .await?;
-                    return Ok(());
-                }
-            }
-        }
-        None => {
-            let builder = PositionsRequest::builder()
-                .user(address)
-                .limit(POSITIONS_PAGE_LIMIT);
-            match builder {
-                Ok(builder) => builder.build(),
-                Err(_) => {
-                    bot.send_message(chat_id, "Could not build positions request.")
-                        .await?;
-                    return Ok(());
-                }
-            }
-        }
-    };
-
-    let positions = match client.fetch_positions(&request).await {
-        Ok(positions) => positions,
-        Err(_) => {
-            bot.send_message(chat_id, "Could not fetch positions.")
+    let request = if let Some(condition_id) = condition_id {
+        let builder = PositionsRequest::builder()
+            .user(address)
+            .filter(MarketFilter::markets([condition_id]))
+            .limit(POSITIONS_PAGE_LIMIT);
+        if let Ok(builder) = builder {
+            builder.build()
+        } else {
+            bot.send_message(chat_id, "Could not build positions request.")
                 .await?;
             return Ok(());
         }
+    } else {
+        let builder = PositionsRequest::builder()
+            .user(address)
+            .limit(POSITIONS_PAGE_LIMIT);
+        if let Ok(builder) = builder {
+            builder.build()
+        } else {
+            bot.send_message(chat_id, "Could not build positions request.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let Ok(positions) = client.fetch_positions(&request).await else {
+        bot.send_message(chat_id, "Could not fetch positions.")
+            .await?;
+        return Ok(());
     };
 
     let matching: Vec<_> = match condition_id {
@@ -637,10 +620,10 @@ pub(crate) async fn handle_show_positions(
         ));
     }
 
-    if condition_id.is_some() {
-        if let Some(summary) = build_directional_summary(&matching) {
-            lines.push(summary);
-        }
+    if condition_id.is_some()
+        && let Some(summary) = build_directional_summary(&matching)
+    {
+        lines.push(summary);
     }
 
     bot.send_message(chat_id, lines.join("\n\n"))
@@ -650,84 +633,10 @@ pub(crate) async fn handle_show_positions(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wallet_type_error_detection_matches_keywords() {
-        assert!(is_wallet_type_error("signature type mismatch"));
-        assert!(is_wallet_type_error("Proxy wallet derivation"));
-        assert!(is_wallet_type_error("Cannot have a funder address"));
-        assert!(is_wallet_type_error("USER TYPE invalid"));
-        assert!(!is_wallet_type_error("network timeout"));
-    }
-
-    #[test]
-    fn format_signed_usd_includes_sign() {
-        assert_eq!(
-            format_signed_usd(Decimal::from_str("120.732").unwrap()),
-            "+$120.732"
-        );
-        assert_eq!(
-            format_signed_usd(Decimal::from_str("-72.012").unwrap()),
-            "-$72.012"
-        );
-    }
-
-    #[test]
-    fn format_value_change_includes_percent_with_two_decimals() {
-        let pnl = Decimal::from_str("120.732").unwrap();
-        let cost = Decimal::from_str("917.568").unwrap();
-        assert_eq!(format_value_change(pnl, cost), "(+$120.732, +13.16%)");
-    }
-
-    #[test]
-    fn format_value_change_zero_cost_shows_na_percent() {
-        let pnl = Decimal::from_str("10").unwrap();
-        assert_eq!(format_value_change(pnl, Decimal::ZERO), "(+$10.000, N/A)");
-    }
-
-    #[test]
-    fn format_position_message_uses_multiline_layout() {
-        let formatted = format_position_message(
-            "YES",
-            Decimal::from_str("75.758").unwrap(),
-            Decimal::from_str("0.660").unwrap(),
-            Decimal::from_str("0.855").unwrap(),
-            Decimal::from_str("14.773").unwrap(),
-        );
-
-        assert_eq!(
-            formatted,
-            "• <b>YES</b>\n<b>Size:</b> 75.758\n<b>Price:</b> $0.660 (1.52) → $0.855 (1.17)\n<b>Value:</b> $50.000 → $64.773 (+$14.773, +29.55%)"
-        );
-    }
-
-    #[test]
-    fn format_directional_summary_handles_hedged_market_with_net_side() {
-        let formatted = format_directional_summary(
-            "Natus Vincere",
-            Decimal::from_str("4996.590").unwrap(),
-            Decimal::from_str("0.398").unwrap(),
-            "BetBoom Team",
-            Decimal::from_str("4634.810").unwrap(),
-            Decimal::from_str("0.607").unwrap(),
-        );
-
-        assert_eq!(
-            formatted,
-            "<b>Directional Summary</b>\n<b>Direction:</b> Natus Vincere +361.780\n<b>Hedged:</b> 4634.810\n<b>Hedge Carry:</b> -$23.174\n<b>If Natus Vincere wins:</b> +$194.618\n<b>If BetBoom Team wins:</b> -$167.162"
-        );
-    }
-
-    #[test]
-    fn build_directional_summary_requires_two_distinct_outcomes() {
-        let positions: Vec<&Position> = Vec::new();
-        assert!(build_directional_summary(&positions).is_none());
-    }
-}
-
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear validate, sign, and store flow"
+)]
 pub(crate) async fn handle_auth_key_input(
     bot: &Bot,
     msg: &Message,
@@ -754,7 +663,7 @@ pub(crate) async fn handle_auth_key_input(
         )
         .parse_mode(ParseMode::Html)
         .await?;
-        send_manage_menu(&bot, msg.chat.id).await?;
+        send_manage_menu(bot, msg.chat.id).await?;
         return Ok(());
     }
 
@@ -766,7 +675,7 @@ pub(crate) async fn handle_auth_key_input(
         );
         bot.send_message(msg.chat.id, "Set ENCRYPTION_KEY to store managed wallets.")
             .await?;
-        send_manage_menu(&bot, msg.chat.id).await?;
+        send_manage_menu(bot, msg.chat.id).await?;
         return Ok(());
     };
 
@@ -780,22 +689,18 @@ pub(crate) async fn handle_auth_key_input(
         return Ok(());
     }
 
-    let signer = match LocalSigner::from_str(private_key) {
-        Ok(signer) => signer.with_chain_id(Some(POLYGON)),
-        Err(_) => {
-            bot.send_message(msg.chat.id, "Invalid private key format.")
-                .await?;
-            return Ok(());
-        }
+    let signer = if let Ok(signer) = LocalSigner::from_str(private_key) {
+        signer.with_chain_id(Some(POLYGON))
+    } else {
+        bot.send_message(msg.chat.id, "Invalid private key format.")
+            .await?;
+        return Ok(());
     };
 
-    let wallet_address = match WalletAddress::parse(&signer.address().to_string()) {
-        Some(address) => address,
-        None => {
-            bot.send_message(msg.chat.id, "Invalid private key format.")
-                .await?;
-            return Ok(());
-        }
+    let Some(wallet_address) = WalletAddress::parse(&signer.address().to_string()) else {
+        bot.send_message(msg.chat.id, "Invalid private key format.")
+            .await?;
+        return Ok(());
     };
     let aad = crypto::build_aad(user_id, wallet_address.as_str());
     let (encrypted_key, nonce) =
@@ -880,7 +785,7 @@ pub(crate) async fn handle_auth_label_input(
         return Ok(());
     }
 
-    finalize_manage_label(&bot, msg.chat.id, db, user_id, wallet_address, Some(label)).await?;
+    finalize_manage_label(bot, msg.chat.id, db, user_id, wallet_address, Some(label)).await?;
     Ok(())
 }
 
@@ -898,4 +803,82 @@ pub(crate) async fn handle_positions_input(
     );
     send_managed_positions(bot, client, msg.chat.id, db, user_id).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wallet_type_error_detection_matches_keywords() {
+        assert!(is_wallet_type_error("signature type mismatch"));
+        assert!(is_wallet_type_error("Proxy wallet derivation"));
+        assert!(is_wallet_type_error("Cannot have a funder address"));
+        assert!(is_wallet_type_error("USER TYPE invalid"));
+        assert!(!is_wallet_type_error("network timeout"));
+    }
+
+    #[test]
+    fn format_signed_usd_includes_sign() {
+        assert_eq!(
+            format_signed_usd(Decimal::from_str("120.732").unwrap()),
+            "+$120.732"
+        );
+        assert_eq!(
+            format_signed_usd(Decimal::from_str("-72.012").unwrap()),
+            "-$72.012"
+        );
+    }
+
+    #[test]
+    fn format_value_change_includes_percent_with_two_decimals() {
+        let pnl = Decimal::from_str("120.732").unwrap();
+        let cost = Decimal::from_str("917.568").unwrap();
+        assert_eq!(format_value_change(pnl, cost), "(+$120.732, +13.16%)");
+    }
+
+    #[test]
+    fn format_value_change_zero_cost_shows_na_percent() {
+        let pnl = Decimal::from_str("10").unwrap();
+        assert_eq!(format_value_change(pnl, Decimal::ZERO), "(+$10.000, N/A)");
+    }
+
+    #[test]
+    fn format_position_message_uses_multiline_layout() {
+        let formatted = format_position_message(
+            "YES",
+            Decimal::from_str("75.758").unwrap(),
+            Decimal::from_str("0.660").unwrap(),
+            Decimal::from_str("0.855").unwrap(),
+            Decimal::from_str("14.773").unwrap(),
+        );
+
+        assert_eq!(
+            formatted,
+            "• <b>YES</b>\n<b>Size:</b> 75.758\n<b>Price:</b> $0.660 (1.52) → $0.855 (1.17)\n<b>Value:</b> $50.000 → $64.773 (+$14.773, +29.55%)"
+        );
+    }
+
+    #[test]
+    fn format_directional_summary_handles_hedged_market_with_net_side() {
+        let formatted = format_directional_summary(
+            "Natus Vincere",
+            Decimal::from_str("4996.590").unwrap(),
+            Decimal::from_str("0.398").unwrap(),
+            "BetBoom Team",
+            Decimal::from_str("4634.810").unwrap(),
+            Decimal::from_str("0.607").unwrap(),
+        );
+
+        assert_eq!(
+            formatted,
+            "<b>Directional Summary</b>\n<b>Direction:</b> Natus Vincere +361.780\n<b>Hedged:</b> 4634.810\n<b>Hedge Carry:</b> -$23.174\n<b>If Natus Vincere wins:</b> +$194.618\n<b>If BetBoom Team wins:</b> -$167.162"
+        );
+    }
+
+    #[test]
+    fn build_directional_summary_requires_two_distinct_outcomes() {
+        let positions: Vec<&Position> = Vec::new();
+        assert!(build_directional_summary(&positions).is_none());
+    }
 }

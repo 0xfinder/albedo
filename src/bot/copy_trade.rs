@@ -39,9 +39,8 @@ pub(crate) fn format_copy_trade_preview(state: &db::CopyTradeState) -> String {
             _ => "Est. Cost: N/A".to_string(),
         }
     };
-    let size_display = parse_decimal(&state.size)
-        .map(format_decimal)
-        .unwrap_or_else(|| state.size.clone());
+    let size_display =
+        parse_decimal(&state.size).map_or_else(|| state.size.clone(), format_decimal);
 
     format!(
         "{side_emoji} <b>Copy Trade</b>\n\n\
@@ -86,13 +85,10 @@ pub(crate) async fn send_copy_trade_preview(
     db: &Db,
     ct_id: i64,
 ) -> ResponseResult<()> {
-    let state = match db::get_copy_trade_state(db, ct_id).await {
-        Ok(Some(state)) => state,
-        _ => {
-            bot.send_message(chat_id, "Could not load copy trade state.")
-                .await?;
-            return Ok(());
-        }
+    let Ok(Some(state)) = db::get_copy_trade_state(db, ct_id).await else {
+        bot.send_message(chat_id, "Could not load copy trade state.")
+            .await?;
+        return Ok(());
     };
 
     let message = format_copy_trade_preview(&state);
@@ -112,10 +108,7 @@ pub(crate) async fn handle_copy_trade_init(
     user_id: i64,
     cb_id: i64,
 ) -> ResponseResult<()> {
-    let managed = match db::get_managed_wallet(db, user_id).await {
-        Ok(Some(_)) => true,
-        _ => false,
-    };
+    let managed = matches!(db::get_managed_wallet(db, user_id).await, Ok(Some(_)));
 
     if !managed {
         bot.send_message(chat_id, "Set up a managed wallet first via /manage.")
@@ -132,47 +125,41 @@ pub(crate) async fn handle_copy_trade_init(
         }
     };
 
-    let (token_id, side, price, size) = match (
+    let (Some(token_id), Some(side), Some(price), Some(order_size)) = (
         cb_data.token_id.as_deref(),
         cb_data.side.as_deref(),
         cb_data.price.as_deref(),
         cb_data.size.as_deref(),
-    ) {
-        (Some(t), Some(s), Some(p), Some(sz)) => (t, s, p, sz),
-        _ => {
-            bot.send_message(
-                chat_id,
-                "This activity does not have enough data to copy trade.",
-            )
-            .await?;
-            return Ok(());
-        }
+    ) else {
+        bot.send_message(
+            chat_id,
+            "This activity does not have enough data to copy trade.",
+        )
+        .await?;
+        return Ok(());
     };
 
-    let ct_id = match db::insert_copy_trade_state(
+    let Ok(copy_trade_id) = db::insert_copy_trade_state(
         db,
         db::NewCopyTrade {
             user_id,
             token_id,
             side,
             price,
-            size,
+            size: order_size,
             order_type: "limit",
             market_title: cb_data.market_title.as_deref(),
             outcome: cb_data.outcome.as_deref(),
         },
     )
     .await
-    {
-        Ok(id) => id,
-        Err(_) => {
-            bot.send_message(chat_id, "Could not create copy trade state.")
-                .await?;
-            return Ok(());
-        }
+    else {
+        bot.send_message(chat_id, "Could not create copy trade state.")
+            .await?;
+        return Ok(());
     };
 
-    send_copy_trade_preview(bot, chat_id, db, ct_id).await?;
+    send_copy_trade_preview(bot, chat_id, db, copy_trade_id).await?;
 
     Ok(())
 }
@@ -216,9 +203,8 @@ pub(crate) async fn handle_copy_trade_flip(
         user_id,
     );
 
-    let state = match db::get_copy_trade_state(db, ct_id).await {
-        Ok(Some(state)) => state,
-        _ => return Ok(()),
+    let Ok(Some(state)) = db::get_copy_trade_state(db, ct_id).await else {
+        return Ok(());
     };
 
     let message = format_copy_trade_preview(&state);
@@ -258,9 +244,8 @@ pub(crate) async fn handle_copy_trade_toggle_type(
         user_id,
     );
 
-    let state = match db::get_copy_trade_state(db, ct_id).await {
-        Ok(Some(state)) => state,
-        _ => return Ok(()),
+    let Ok(Some(state)) = db::get_copy_trade_state(db, ct_id).await else {
+        return Ok(());
     };
 
     let message = format_copy_trade_preview(&state);
@@ -277,6 +262,10 @@ pub(crate) async fn handle_copy_trade_toggle_type(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear load, preview, sign, and post flow"
+)]
 pub(crate) async fn handle_copy_trade_confirm(
     bot: &Bot,
     chat_id: ChatId,
@@ -295,20 +284,14 @@ pub(crate) async fn handle_copy_trade_confirm(
         return Ok(());
     };
 
-    let token_id = match parse_token_id(&state.token_id) {
-        Some(token_id) => token_id,
-        None => {
-            bot.send_message(chat_id, "Invalid token ID.").await?;
-            return Ok(());
-        }
+    let Some(token_id) = parse_token_id(&state.token_id) else {
+        bot.send_message(chat_id, "Invalid token ID.").await?;
+        return Ok(());
     };
 
-    let side = match parse_side(&state.side) {
-        Some(side) => side,
-        None => {
-            bot.send_message(chat_id, "Invalid side.").await?;
-            return Ok(());
-        }
+    let Some(side) = parse_side(&state.side) else {
+        bot.send_message(chat_id, "Invalid side.").await?;
+        return Ok(());
     };
 
     let (signer, signature_type) =
@@ -345,94 +328,70 @@ pub(crate) async fn handle_copy_trade_confirm(
     };
 
     let response = if state.order_type == "market" {
-        let amount_value = match parse_decimal(&state.size) {
-            Some(value) => value,
-            None => {
-                bot.send_message(chat_id, "Invalid size.").await?;
-                return Ok(());
-            }
+        let Some(amount_value) = parse_decimal(&state.size) else {
+            bot.send_message(chat_id, "Invalid size.").await?;
+            return Ok(());
         };
 
         let amount = match side {
             Side::Sell => Amount::shares(amount_value),
             _ => Amount::usdc(amount_value),
         };
-        let amount = match amount {
-            Ok(amount) => amount,
-            Err(_) => {
-                bot.send_message(chat_id, "Invalid amount for this order.")
-                    .await?;
-                return Ok(());
-            }
+        let Ok(amount) = amount else {
+            bot.send_message(chat_id, "Invalid amount for this order.")
+                .await?;
+            return Ok(());
         };
 
-        let signable = match client
+        let Ok(signable) = client
             .market_order()
             .token_id(token_id)
             .side(side)
             .amount(amount)
             .build()
             .await
-        {
-            Ok(order) => order,
-            Err(_) => {
-                bot.send_message(chat_id, "Could not build market order.")
-                    .await?;
-                return Ok(());
-            }
+        else {
+            bot.send_message(chat_id, "Could not build market order.")
+                .await?;
+            return Ok(());
         };
 
-        let signed = match client.sign(&signer, signable).await {
-            Ok(order) => order,
-            Err(_) => {
-                bot.send_message(chat_id, "Could not sign order.").await?;
-                return Ok(());
-            }
+        let Ok(signed_order) = client.sign(&signer, signable).await else {
+            bot.send_message(chat_id, "Could not sign order.").await?;
+            return Ok(());
         };
 
-        client.post_order(signed).await
+        client.post_order(signed_order).await
     } else {
-        let price = match parse_decimal(&state.price) {
-            Some(value) => value,
-            None => {
-                bot.send_message(chat_id, "Invalid price.").await?;
-                return Ok(());
-            }
+        let Some(price) = parse_decimal(&state.price) else {
+            bot.send_message(chat_id, "Invalid price.").await?;
+            return Ok(());
         };
-        let size = match parse_decimal(&state.size) {
-            Some(value) => value,
-            None => {
-                bot.send_message(chat_id, "Invalid size.").await?;
-                return Ok(());
-            }
+        let Some(order_size) = parse_decimal(&state.size) else {
+            bot.send_message(chat_id, "Invalid size.").await?;
+            return Ok(());
         };
 
-        let signable = match client
+        let Ok(signable) = client
             .limit_order()
             .token_id(token_id)
             .side(side)
             .price(price)
-            .size(size)
+            .size(order_size)
             .build()
             .await
-        {
-            Ok(order) => order,
-            Err(_) => {
-                bot.send_message(chat_id, "Could not build limit order.")
-                    .await?;
-                return Ok(());
-            }
+        else {
+            bot.send_message(chat_id, "Could not build limit order.")
+                .await?;
+            return Ok(());
         };
 
-        let signed = match client.sign(&signer, signable).await {
-            Ok(order) => order,
-            Err(_) => {
-                bot.send_message(chat_id, "Could not sign order.").await?;
-                return Ok(());
-            }
+        let Ok(signed_order) = client.sign(&signer, signable).await else {
+            bot.send_message(chat_id, "Could not sign order.").await?;
+            return Ok(());
         };
 
-        client.post_order(signed).await
+        client.post_order(signed_order).await
     };
 
     match response {
@@ -473,6 +432,122 @@ pub(crate) async fn handle_copy_trade_confirm(
         user_id,
     );
 
+    Ok(())
+}
+
+pub(crate) async fn handle_price_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    data: Option<&str>,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(ct_id_str) = data else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+    let Ok(ct_id) = ct_id_str.parse::<i64>() else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+    let price = if parse_decimal(input).is_some() {
+        input.trim()
+    } else {
+        bot.send_message(msg.chat.id, "Price must be a decimal number (e.g., 0.47).")
+            .await?;
+        return Ok(());
+    };
+    if load_owned_copy_trade_state(bot, msg.chat.id, db, user_id, ct_id)
+        .await
+        .is_none()
+    {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        return Ok(());
+    }
+    log_db_error(
+        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await,
+        "update_copy_trade_field",
+        user_id,
+    );
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
+    send_copy_trade_preview(bot, msg.chat.id, db, ct_id).await?;
+    Ok(())
+}
+
+pub(crate) async fn handle_size_input(
+    bot: &Bot,
+    msg: &Message,
+    db: &Db,
+    user_id: i64,
+    data: Option<&str>,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(ct_id_str) = data else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+    let Ok(ct_id) = ct_id_str.parse::<i64>() else {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
+        return Ok(());
+    };
+    let size = if parse_decimal(input).is_some() {
+        input.trim()
+    } else {
+        bot.send_message(msg.chat.id, "Size must be a number.")
+            .await?;
+        return Ok(());
+    };
+    if load_owned_copy_trade_state(bot, msg.chat.id, db, user_id, ct_id)
+        .await
+        .is_none()
+    {
+        log_db_error(
+            db::clear_pending_state(db, user_id).await,
+            "clear_pending_state",
+            user_id,
+        );
+        return Ok(());
+    }
+    log_db_error(
+        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await,
+        "update_copy_trade_field",
+        user_id,
+    );
+    log_db_error(
+        db::clear_pending_state(db, user_id).await,
+        "clear_pending_state",
+        user_id,
+    );
+    send_copy_trade_preview(bot, msg.chat.id, db, ct_id).await?;
     Ok(())
 }
 
@@ -607,128 +682,4 @@ mod tests {
         assert!(data.contains(&"ct_price:99".to_string()));
         assert!(data.contains(&"ct_size:99".to_string()));
     }
-}
-
-pub(crate) async fn handle_price_input(
-    bot: &Bot,
-    msg: &Message,
-    db: &Db,
-    user_id: i64,
-    data: Option<&str>,
-    input: &str,
-) -> ResponseResult<()> {
-    let Some(ct_id_str) = data else {
-        log_db_error(
-            db::clear_pending_state(db, user_id).await,
-            "clear_pending_state",
-            user_id,
-        );
-        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-        return Ok(());
-    };
-    let ct_id = match ct_id_str.parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
-            log_db_error(
-                db::clear_pending_state(db, user_id).await,
-                "clear_pending_state",
-                user_id,
-            );
-            bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-            return Ok(());
-        }
-    };
-    let price = match parse_decimal(input) {
-        Some(_) => input.trim(),
-        None => {
-            bot.send_message(msg.chat.id, "Price must be a decimal number (e.g., 0.47).")
-                .await?;
-            return Ok(());
-        }
-    };
-    if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
-        .await
-        .is_none()
-    {
-        log_db_error(
-            db::clear_pending_state(db, user_id).await,
-            "clear_pending_state",
-            user_id,
-        );
-        return Ok(());
-    }
-    log_db_error(
-        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Price, price).await,
-        "update_copy_trade_field",
-        user_id,
-    );
-    log_db_error(
-        db::clear_pending_state(db, user_id).await,
-        "clear_pending_state",
-        user_id,
-    );
-    send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
-    Ok(())
-}
-
-pub(crate) async fn handle_size_input(
-    bot: &Bot,
-    msg: &Message,
-    db: &Db,
-    user_id: i64,
-    data: Option<&str>,
-    input: &str,
-) -> ResponseResult<()> {
-    let Some(ct_id_str) = data else {
-        log_db_error(
-            db::clear_pending_state(db, user_id).await,
-            "clear_pending_state",
-            user_id,
-        );
-        bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-        return Ok(());
-    };
-    let ct_id = match ct_id_str.parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
-            log_db_error(
-                db::clear_pending_state(db, user_id).await,
-                "clear_pending_state",
-                user_id,
-            );
-            bot.send_message(msg.chat.id, MSG_ACTION_EXPIRED).await?;
-            return Ok(());
-        }
-    };
-    let size = match parse_decimal(input) {
-        Some(_) => input.trim(),
-        None => {
-            bot.send_message(msg.chat.id, "Size must be a number.")
-                .await?;
-            return Ok(());
-        }
-    };
-    if load_owned_copy_trade_state(&bot, msg.chat.id, db, user_id, ct_id)
-        .await
-        .is_none()
-    {
-        log_db_error(
-            db::clear_pending_state(db, user_id).await,
-            "clear_pending_state",
-            user_id,
-        );
-        return Ok(());
-    }
-    log_db_error(
-        db::update_copy_trade_field(db, ct_id, db::CopyTradeField::Size, size).await,
-        "update_copy_trade_field",
-        user_id,
-    );
-    log_db_error(
-        db::clear_pending_state(db, user_id).await,
-        "clear_pending_state",
-        user_id,
-    );
-    send_copy_trade_preview(&bot, msg.chat.id, db, ct_id).await?;
-    Ok(())
 }

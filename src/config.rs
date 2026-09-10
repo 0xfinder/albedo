@@ -59,7 +59,7 @@ impl Config {
         let data_poll_interval =
             parse_data_poll_interval(env::var("POLYMARKET_DATA_POLL_SECONDS").ok());
         let encryption_key = read_encryption_key()?;
-        let copy_trade_enabled = parse_enabled_flag(env::var("COPY_TRADE_ENABLED").ok());
+        let copy_trade_enabled = parse_enabled_flag(env::var("COPY_TRADE_ENABLED").ok().as_deref());
         let allowed_telegram_ids =
             parse_allowed_telegram_ids(env::var("ALLOWED_TELEGRAM_IDS").ok());
 
@@ -75,8 +75,14 @@ impl Config {
 }
 
 // Feature flags default to off; only explicit truthy values enable them.
-fn parse_enabled_flag(raw: Option<String>) -> bool {
-    matches!(raw.as_deref().map(str::trim), Some(v) if v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+fn parse_enabled_flag(raw: Option<&str>) -> bool {
+    matches!(
+        raw.map(str::trim),
+        Some(v)
+            if v.eq_ignore_ascii_case("1")
+                || v.eq_ignore_ascii_case("true")
+                || v.eq_ignore_ascii_case("yes")
+    )
 }
 
 // Fail closed: an unset or empty list locks the bot down entirely. Only
@@ -110,20 +116,19 @@ fn normalize_database_url(raw: String) -> String {
     }
 
     if let Some(stripped) = raw.strip_prefix("sqlite:") {
-        return format!("sqlite://{}", stripped);
+        return format!("sqlite://{stripped}");
     }
 
     if raw.contains("://") {
         return raw;
     }
 
-    format!("sqlite://{}", raw)
+    format!("sqlite://{raw}")
 }
 
 fn read_encryption_key() -> Result<Option<EncryptionKey>> {
-    let value = match env::var("ENCRYPTION_KEY") {
-        Ok(value) => value,
-        Err(_) => return Ok(None),
+    let Ok(value) = env::var("ENCRYPTION_KEY") else {
+        return Ok(None);
     };
 
     Ok(Some(EncryptionKey::from_hex(&value)?))
@@ -213,16 +218,16 @@ mod tests {
     #[test]
     fn parse_enabled_flag_defaults_to_off() {
         assert!(!parse_enabled_flag(None));
-        assert!(!parse_enabled_flag(Some(String::new())));
-        assert!(!parse_enabled_flag(Some("0".to_string())));
+        assert!(!parse_enabled_flag(Some("")));
+        assert!(!parse_enabled_flag(Some("0")));
     }
 
     #[test]
     fn parse_enabled_flag_accepts_truthy_values() {
-        assert!(parse_enabled_flag(Some("1".to_string())));
-        assert!(parse_enabled_flag(Some("true".to_string())));
-        assert!(parse_enabled_flag(Some("YES".to_string())));
-        assert!(parse_enabled_flag(Some(" yes ".to_string())));
+        assert!(parse_enabled_flag(Some("1")));
+        assert!(parse_enabled_flag(Some("true")));
+        assert!(parse_enabled_flag(Some("YES")));
+        assert!(parse_enabled_flag(Some(" yes ")));
     }
 
     #[test]

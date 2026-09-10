@@ -4,6 +4,13 @@
 //! dispatcher, which runs until shutdown. Access is fail-closed: an empty
 //! allowlist locks the bot down for everyone.
 
+// The Polymarket SDK pulls several major versions of crates like `ark-ff`.
+// Only upstream can deduplicate that tree.
+#![expect(
+    clippy::multiple_crate_versions,
+    reason = "duplicate versions come from the Polymarket SDK dependency tree"
+)]
+
 mod bot;
 mod config;
 mod db;
@@ -60,8 +67,9 @@ async fn main() -> Result<()> {
 
     let _ws_handle = monitoring::spawn_ws_user_events(state.clone());
 
-    // Start bot dispatcher
-    bot::start(state).await?;
+    // Start bot dispatcher. The dispatcher future is large, so keep it off
+    // the stack.
+    Box::pin(bot::start(state)).await?;
 
     Ok(())
 }

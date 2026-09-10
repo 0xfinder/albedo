@@ -25,7 +25,7 @@ pub fn format_value(value: Decimal) -> String {
 
 /// Format an optional value, rendering missing data as `N/A`.
 pub fn format_option_value(value: Option<Decimal>) -> String {
-    value.map(format_value).unwrap_or_else(|| "N/A".to_string())
+    value.map_or_else(|| "N/A".to_string(), format_value)
 }
 
 /// Format a value as dollars, e.g. `$0.500`.

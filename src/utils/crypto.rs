@@ -116,13 +116,13 @@ mod tests {
 
     #[test]
     fn encryption_key_from_hex_with_0x_prefix() {
-        let key = EncryptionKey::from_hex(&format!("0x{}", TEST_KEY_HEX));
+        let key = EncryptionKey::from_hex(&format!("0x{TEST_KEY_HEX}"));
         assert!(key.is_ok());
     }
 
     #[test]
     fn encryption_key_from_hex_with_whitespace() {
-        let key = EncryptionKey::from_hex(&format!("  {}  ", TEST_KEY_HEX));
+        let key = EncryptionKey::from_hex(&format!("  {TEST_KEY_HEX}  "));
         assert!(key.is_ok());
     }
 

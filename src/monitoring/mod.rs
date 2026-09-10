@@ -198,9 +198,7 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
 /// Returns `None` when no encryption key is configured, since managed-wallet
 /// events cannot be authenticated without one.
 pub fn spawn_ws_user_events(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
-    if state.config.encryption_key.is_none() {
-        return None;
-    }
+    state.config.encryption_key.as_ref()?;
 
     Some(tokio::spawn(async move {
         if let Some(encryption_key) = state.config.encryption_key.clone() {
@@ -392,6 +390,11 @@ mod tests {
         activities: std::sync::Mutex<Vec<Activity>>,
     }
 
+    // The trait declares async methods, but this fake has nothing to await.
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "test fake: trait methods are async, the fake resolves immediately"
+    )]
     impl DataApi for FakeData {
         async fn fetch_activity(
             &self,
@@ -420,6 +423,11 @@ mod tests {
         sent: std::sync::Mutex<Vec<(i64, String)>>,
     }
 
+    // The trait declares async methods, but this fake has nothing to await.
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "test fake: trait methods are async, the fake resolves immediately"
+    )]
     impl Notifier for FakeNotifier {
         async fn notify(
             &self,
@@ -438,7 +446,7 @@ mod tests {
     fn test_activity(tx_hash: &str) -> Activity {
         serde_json::from_value(serde_json::json!({
             "proxyWallet": "0x1111111111111111111111111111111111111111",
-            "timestamp": 1700000000,
+            "timestamp": 1_700_000_000,
             "type": "TRADE",
             "size": 10.0,
             "usdcSize": 5.0,
@@ -666,7 +674,7 @@ mod tests {
             size: "10".to_string(),
             usdc_size: "5.50".to_string(),
             price: Some("0.55".to_string()),
-            timestamp: 1700000000,
+            timestamp: 1_700_000_000,
             tx_hash: "0xabc123".to_string(),
             condition_id: None,
             asset: None,
@@ -696,7 +704,7 @@ mod tests {
             size: "100".to_string(),
             usdc_size: "100".to_string(),
             price: None,
-            timestamp: 1700000000,
+            timestamp: 1_700_000_000,
             tx_hash: "0xdef456".to_string(),
             condition_id: None,
             asset: None,
@@ -718,7 +726,7 @@ mod tests {
             size: "100".to_string(),
             usdc_size: "100".to_string(),
             price: None,
-            timestamp: 1700000000,
+            timestamp: 1_700_000_000,
             tx_hash: "0xdef456".to_string(),
             condition_id: None,
             asset: None,
@@ -744,7 +752,7 @@ mod tests {
             size: "100".to_string(),
             usdc_size: "100".to_string(),
             price: None,
-            timestamp: 1700000000,
+            timestamp: 1_700_000_000,
             tx_hash: "0xdef456".to_string(),
             condition_id: None,
             asset: None,
@@ -770,7 +778,7 @@ mod tests {
             size: "100".to_string(),
             usdc_size: "100".to_string(),
             price: None,
-            timestamp: 1700000000,
+            timestamp: 1_700_000_000,
             tx_hash: "0xdef456".to_string(),
             condition_id: None,
             asset: None,
@@ -836,7 +844,8 @@ async fn build_activity_keyboard(
         return None;
     }
     let condition_id = notification.condition_id.as_deref()?;
-    let (trade_token, trade_side, trade_price, trade_size) = if notification.kind().is_tradeable() {
+    let (trade_token, trade_side, trade_price, trade_shares) = if notification.kind().is_tradeable()
+    {
         (
             notification.asset.as_deref(),
             notification.side.as_deref(),
@@ -855,7 +864,7 @@ async fn build_activity_keyboard(
             token_id: trade_token,
             side: trade_side,
             price: trade_price,
-            size: trade_size,
+            size: trade_shares,
             market_title: Some(notification.market.as_str()),
             outcome: notification.outcome.as_deref(),
         },
@@ -887,7 +896,7 @@ where
             tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
         }
         match send().into_future().await {
-            Ok(_) => return true,
+            Ok(()) => return true,
             Err(err) => {
                 tracing::warn!(
                     attempt = attempt + 1,
@@ -946,6 +955,10 @@ async fn record_activity_delivery(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one poll pass: read cursor, diff events, notify, persist"
+)]
 async fn poll_activity(
     notifier: &impl Notifier,
     client: &impl DataApi,
@@ -983,21 +996,20 @@ async fn poll_activity(
 
     let last_hash = wallet.last_activity_hash.as_deref();
     if last_hash.is_none() {
-        if let Some(hash) = latest_hash.as_deref() {
-            if let Err(err) = db::update_tracked_wallet_activity_hash(
+        if let Some(hash) = latest_hash.as_deref()
+            && let Err(err) = db::update_tracked_wallet_activity_hash(
                 db,
                 wallet.user_id,
                 &wallet.wallet_address,
                 Some(hash),
             )
             .await
-            {
-                tracing::warn!(
-                    wallet = wallet.wallet_address.as_str(),
-                    error = %err,
-                    "activity cursor init failed"
-                );
-            }
+        {
+            tracing::warn!(
+                wallet = wallet.wallet_address.as_str(),
+                error = %err,
+                "activity cursor init failed"
+            );
         }
         return Ok(());
     }
@@ -1237,7 +1249,7 @@ impl ActivityNotification {
             market,
             market_slug: activity.slug.clone(),
             outcome: activity.outcome.clone(),
-            side: activity.side.as_ref().map(|side| format!("{:?}", side)),
+            side: activity.side.as_ref().map(|side| format!("{side:?}")),
             size: format_decimal(activity.size),
             usdc_size: format_decimal(activity.usdc_size),
             price: activity.price.map(format_decimal),
@@ -1295,8 +1307,7 @@ fn format_activity_message(
     let outcome = notification.outcome.as_deref().unwrap_or("N/A");
     let size = Decimal::from_str(notification.size.as_str())
         .ok()
-        .map(number_format::format_value)
-        .unwrap_or_else(|| notification.size.clone());
+        .map_or_else(|| notification.size.clone(), number_format::format_value);
     let price = notification
         .price
         .as_deref()
@@ -1304,8 +1315,10 @@ fn format_activity_message(
         .unwrap_or_else(|| "N/A".to_string());
     let value = Decimal::from_str(notification.usdc_size.as_str())
         .ok()
-        .map(number_format::format_usd)
-        .unwrap_or_else(|| format!("${}", notification.usdc_size));
+        .map_or_else(
+            || format!("${}", notification.usdc_size),
+            number_format::format_usd,
+        );
 
     if kind.is_reward() {
         return format!(
@@ -1448,19 +1461,16 @@ fn format_ws_trade_message(label: &str, trade: &TradeMessage, market_label: &str
     let role = trade
         .trader_side
         .as_ref()
-        .map(|side| format!("{:?}", side))
-        .unwrap_or_else(|| "N/A".to_string());
+        .map_or_else(|| "N/A".to_string(), |side| format!("{side:?}"));
     let outcome = trade.outcome.as_deref().unwrap_or("N/A");
     let timestamp = trade
         .timestamp
         .or(trade.matchtime)
         .or(trade.last_update)
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "N/A".to_string());
+        .map_or_else(|| "N/A".to_string(), |value| value.to_string());
     let tx_hash = trade
         .transaction_hash
-        .map(|hash| hash.to_string())
-        .unwrap_or_else(|| "N/A".to_string());
+        .map_or_else(|| "N/A".to_string(), |hash| hash.to_string());
 
     format!(
         "Trade for {label}\nStatus: {status} | Side: {side} | Role: {role}\nMarket: {market}\nAsset: {asset}\nOutcome: {outcome}\nSize: {size} @ {price}\nTx: {tx_hash} | Time: {timestamp}",
@@ -1475,22 +1485,20 @@ fn format_ws_order_message(label: &str, order: &OrderMessage, market_label: &str
     let msg_type = order
         .msg_type
         .as_ref()
-        .map(|msg_type| format!("{:?}", msg_type))
-        .unwrap_or_else(|| "Update".to_string());
+        .map_or_else(|| "Update".to_string(), |msg_type| format!("{msg_type:?}"));
     let outcome = order.outcome.as_deref().unwrap_or("N/A");
     let timestamp = order
         .timestamp
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "N/A".to_string());
+        .map_or_else(|| "N/A".to_string(), |value| value.to_string());
     let original_size = format_optional_decimal(order.original_size);
     let matched = format_optional_decimal(order.size_matched);
 
     format!(
-        "Order for {label}\nType: {msg_type}\nOrder: {id}\nMarket: {market}\nAsset: {asset}\nSide: {side} | Outcome: {outcome}\nPrice: {price} | Original: {original_size} | Matched: {matched}\nTime: {timestamp}",
+        "Order for {label}\nType: {msg_type}\nOrder: {id}\nMarket: {market}\nAsset: {asset}\nSide: {side:?} | Outcome: {outcome}\nPrice: {price} | Original: {original_size} | Matched: {matched}\nTime: {timestamp}",
         id = order.id,
         market = market_label,
         asset = order.asset_id,
-        side = format!("{:?}", order.side),
+        side = order.side,
         price = number_format::format_price_with_odds(order.price),
     )
 }

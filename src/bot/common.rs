@@ -31,12 +31,18 @@ pub(crate) const SIG_SAFE: &str = "sig:2";
 pub(crate) const POSITIONS_DISPLAY_LIMIT: usize = 8;
 pub(crate) const POSITIONS_PAGE_LIMIT: i32 = 200;
 
+/// Telegram user IDs are positive and fit in `i64`, so this never truncates.
+pub(crate) fn telegram_user_id(id: u64) -> i64 {
+    i64::try_from(id).expect("telegram user id fits in i64")
+}
+
 pub(crate) fn callback_chat_id(query: &CallbackQuery) -> ChatId {
     query
         .message
         .as_ref()
-        .map(|message| message.chat().id)
-        .unwrap_or(ChatId(query.from.id.0 as i64))
+        .map_or(ChatId(telegram_user_id(query.from.id.0)), |message| {
+            message.chat().id
+        })
 }
 
 /// Best-effort DB write: failures are logged with context instead of dropped.
