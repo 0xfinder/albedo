@@ -13,6 +13,7 @@
 
 mod bot;
 mod config;
+mod data;
 mod db;
 mod monitoring;
 mod state;
@@ -60,7 +61,7 @@ async fn main() -> Result<()> {
         bot,
         db,
         config: Arc::new(config),
-        data_client: polymarket_client_sdk::data::Client::default(),
+        data_client: crate::data::DataClient::default(),
     });
 
     let _data_handle = monitoring::spawn_data_polling(state.clone());

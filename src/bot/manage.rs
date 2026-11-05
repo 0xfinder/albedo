@@ -3,9 +3,9 @@
 use std::fmt::Write as _;
 use std::str::FromStr;
 
+use crate::data::DataClient;
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::types::SignatureType;
-use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::PositionsRequest;
 use polymarket_client_sdk::data::types::response::Position;

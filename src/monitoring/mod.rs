@@ -4,13 +4,13 @@
 //! and retried while the cursor stays put, so the next poll resumes instead
 //! of skipping events.
 
+use crate::data::DataClient;
 use futures::{Stream, StreamExt};
 use polymarket_client_sdk::POLYGON;
 use polymarket_client_sdk::auth::{LocalSigner, Signer};
 use polymarket_client_sdk::clob::Client as ClobClient;
 use polymarket_client_sdk::clob::ws::Client as WsClient;
 use polymarket_client_sdk::clob::ws::types::response::{OrderMessage, TradeMessage, WsMessage};
-use polymarket_client_sdk::data::Client as DataClient;
 use polymarket_client_sdk::data::types::MarketFilter;
 use polymarket_client_sdk::data::types::request::{
     ActivityRequest, PositionsRequest, TradesRequest,
@@ -57,18 +57,18 @@ impl DataApi for DataClient {
         &self,
         request: &ActivityRequest,
     ) -> color_eyre::eyre::Result<Vec<Activity>> {
-        Ok(self.activity(request).await?)
+        self.fetch("activity", request, false).await
     }
 
     async fn fetch_positions(
         &self,
         request: &PositionsRequest,
     ) -> color_eyre::eyre::Result<Vec<Position>> {
-        Ok(self.positions(request).await?)
+        self.fetch("positions", request, true).await
     }
 
     async fn fetch_trades(&self, request: &TradesRequest) -> color_eyre::eyre::Result<Vec<Trade>> {
-        Ok(self.trades(request).await?)
+        self.fetch("trades", request, false).await
     }
 }
 
@@ -390,11 +390,6 @@ mod tests {
         activities: std::sync::Mutex<Vec<Activity>>,
     }
 
-    // The trait declares async methods, but this fake has nothing to await.
-    #[expect(
-        clippy::unused_async_trait_impl,
-        reason = "test fake: trait methods are async, the fake resolves immediately"
-    )]
     impl DataApi for FakeData {
         async fn fetch_activity(
             &self,
@@ -423,11 +418,6 @@ mod tests {
         sent: std::sync::Mutex<Vec<(i64, String)>>,
     }
 
-    // The trait declares async methods, but this fake has nothing to await.
-    #[expect(
-        clippy::unused_async_trait_impl,
-        reason = "test fake: trait methods are async, the fake resolves immediately"
-    )]
     impl Notifier for FakeNotifier {
         async fn notify(
             &self,

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use polymarket_client_sdk::data::Client as DataClient;
+use crate::data::DataClient;
 use teloxide::prelude::Bot;
 
 use crate::config::Config;

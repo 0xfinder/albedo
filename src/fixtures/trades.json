@@ -1,0 +1,21 @@
+{
+  "proxy_wallet": "0xbd050887b28ef80590e25b0d0e4110154d930a55",
+  "side": "SELL",
+  "token_id": "5989025763389678031233953754806777702215685641337052756261511242385344930623",
+  "condition_id": "0x356669ea8f5502d4cf4350e4013f76a0102ae2a8cb51a38f6e7fa0c57862a62e",
+  "size": 0.01,
+  "price": 0.79,
+  "timestamp": 1793847814,
+  "title": "Bitcoin Up or Down - November 4, 10:00PM-10:05PM ET",
+  "slug": "btc-updown-5m-1793847600",
+  "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/BTC+fullsize.png",
+  "event_slug": "btc-updown-5m-1793847600",
+  "outcome": "Up",
+  "outcome_index": 0,
+  "name": "Joble",
+  "pseudonym": "Impressive-Buck",
+  "bio": "",
+  "profile_image": "",
+  "profile_image_optimized": "",
+  "transaction_hash": "0x0194c1c7888127cf7530dfd07ac48a7ac588c8c727e93e3fb1b7644c1b6608a9"
+}

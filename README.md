@@ -102,3 +102,12 @@ Run the test suite:
 ```bash
 cargo test
 ```
+
+## Polymarket Data API
+
+Wallet activity, positions, and market trade lookups use the public
+[Data API v2](https://data-api.polymarket.com/v2/docs). Responses are decoded
+from its `data` envelope; position reads follow `pagination.next_cursor` to
+include the complete portfolio. Activity polls retain their latest-page limit
+and existing transaction-hash checkpoint. No API key or environment changes
+are required for this migration.

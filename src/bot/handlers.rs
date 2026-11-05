@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
+use crate::data::DataClient;
 use polymarket_client_sdk::clob::types::SignatureType;
-use polymarket_client_sdk::data::Client as DataClient;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 

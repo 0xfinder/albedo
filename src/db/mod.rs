@@ -1,4 +1,4 @@
-//! SQLite access via `SQLx`, with compile-time-checked migrations.
+//! `SQLite` access via `SQLx`, with compile-time-checked migrations.
 //!
 //! `Ok(false)` from a `bool`-returning helper means zero rows matched, not a
 //! failure; `Err` means the database itself was unreachable.
@@ -64,7 +64,7 @@ pub struct CopyTradeState {
     pub outcome: Option<String>,
 }
 
-/// Connect to SQLite, enable foreign keys, and run pending migrations.
+/// Connect to `SQLite`, enable foreign keys, and run pending migrations.
 ///
 /// # Errors
 ///

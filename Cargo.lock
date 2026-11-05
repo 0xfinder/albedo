@@ -82,6 +82,7 @@ dependencies = [
  "futures",
  "mimalloc",
  "polymarket-client-sdk",
+ "reqwest 0.13.1",
  "serde",
  "serde_json",
  "sqlx",
