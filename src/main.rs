@@ -15,6 +15,7 @@ mod bot;
 mod config;
 mod data;
 mod db;
+mod health;
 mod monitoring;
 mod state;
 mod utils;
@@ -57,12 +58,20 @@ async fn main() -> Result<()> {
         );
     }
 
+    let data_client = crate::data::DataClient::default();
+    data_client
+        .health
+        .lock()
+        .await
+        .set_poll_interval(config.data_poll_interval);
     let state = Arc::new(AppState {
         bot,
         db,
         config: Arc::new(config),
-        data_client: crate::data::DataClient::default(),
+        data_client,
     });
+
+    health::spawn(state.clone());
 
     let _data_handle = monitoring::spawn_data_polling(state.clone());
 

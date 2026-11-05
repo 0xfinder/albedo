@@ -103,6 +103,28 @@ impl Notifier for teloxide::prelude::Bot {
     }
 }
 
+struct HealthNotifier<'a> {
+    bot: &'a teloxide::prelude::Bot,
+    health: &'a crate::health::SharedHealth,
+}
+
+impl Notifier for HealthNotifier<'_> {
+    async fn notify(
+        &self,
+        chat_id: i64,
+        message: String,
+        markup: Option<InlineKeyboardMarkup>,
+    ) -> color_eyre::eyre::Result<()> {
+        let result = self.bot.notify(chat_id, message, markup).await;
+        self.health.lock().await.record(
+            crate::health::Key::Delivery(chat_id),
+            result.as_ref().err().map(ToString::to_string),
+            Instant::now(),
+        );
+        result
+    }
+}
+
 // Gap between wallets in one poll cycle; avoids bursting the Data API.
 const POLL_WALLET_GAP_MS: u64 = 200;
 // Window for cursor diffing; larger windows cost more per poll.
@@ -161,7 +183,10 @@ pub fn spawn_data_polling(state: Arc<AppState>) -> Option<tokio::task::JoinHandl
                 };
 
                 if let Err(err) = poll_activity(
-                    &state.bot,
+                    &HealthNotifier {
+                        bot: &state.bot,
+                        health: &state.data_client.health,
+                    },
                     &state.data_client,
                     &state.db,
                     &wallet,

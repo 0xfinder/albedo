@@ -8,11 +8,13 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub(crate) struct DataClient {
     http: reqwest::Client,
+    pub(crate) health: crate::health::SharedHealth,
 }
 
 impl Default for DataClient {
     fn default() -> Self {
         Self {
+            health: std::sync::Arc::default(),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -39,7 +41,28 @@ impl DataClient {
         request: &impl Serialize,
         all_pages: bool,
     ) -> Result<Vec<T>> {
-        let mut query = query_params(request)?;
+        let query = query_params(request)?;
+        let key = query
+            .get("user")
+            .filter(|_| matches!(endpoint, "activity" | "positions"))
+            .map(|user| crate::health::Key::Fetch(user.to_ascii_lowercase(), endpoint.into()));
+        let result = self.fetch_pages(endpoint, query, all_pages).await;
+        if let Some(key) = key {
+            self.health.lock().await.record(
+                key,
+                result.as_ref().err().map(ToString::to_string),
+                std::time::Instant::now(),
+            );
+        }
+        result
+    }
+
+    async fn fetch_pages<T: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        mut query: std::collections::BTreeMap<String, String>,
+        all_pages: bool,
+    ) -> Result<Vec<T>> {
         let mut result = Vec::new();
         loop {
             let page: Page = self

@@ -97,6 +97,9 @@ pub async fn handle_message(
     };
 
     if let Some((command, _args)) = parse_incoming_command(text.as_str(), bot_name.as_str()) {
+        if command == "health" {
+            return crate::health::send_report(&state, msg.chat.id, user_id).await;
+        }
         log_db_error(
             db::clear_pending_state(&db, user_id).await,
             "clear_pending_state",

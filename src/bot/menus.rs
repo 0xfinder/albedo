@@ -18,6 +18,7 @@ pub(crate) const HELP_TEXT: &str = "Available commands:
 \
 /manage - Open the manage menu
 \
+/health - Show monitoring health and failures\n\
 /version - Show the bot version";
 
 pub(crate) fn main_menu_markup() -> InlineKeyboardMarkup {

@@ -111,3 +111,24 @@ from its `data` envelope; position reads follow `pagination.next_cursor` to
 include the complete portfolio. Activity polls retain their latest-page limit
 and existing transaction-hash checkpoint. No API key or environment changes
 are required for this migration.
+
+## Monitoring alerts
+
+Albedo checks monitoring health every 15 seconds. For users with tracked
+wallets, it sends a Telegram alert after two minutes of continuous activity
+or position fetch errors, activity notification delivery errors, or database
+read errors. Fetches that stop making progress also alert after two minutes
+(or three configured polling intervals, whichever is longer). Successful empty
+API responses count as progress; a wallet does not need to trade to be healthy.
+
+Alerts are grouped per user, with reminders at most every 30 minutes and one
+recovery message after the affected checks recover. Failed alert sends are
+retried on the next health check. Alerts use your existing private bot chat
+and allowlist; no new configuration is required.
+
+Use `/health` to see your tracked wallets' last successful activity and position
+fetches, current errors, and Telegram activity delivery status. Health history
+and alert cooldowns reset on restart. Archived wallets are excluded, and alerts
+are disabled when polling is disabled. If the process, host, or Telegram itself
+is down, these in-process Telegram alerts cannot reach you; an external monitor
+is needed for that coverage.
